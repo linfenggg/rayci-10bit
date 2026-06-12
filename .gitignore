@@ -1,0 +1,27 @@
+# Build outputs and packaged deliverables
+dist/
+artifacts/
+**/bin/
+**/obj/
+
+# Portable vendor/runtime bundles rebuilt by scripts
+GalaxyViewPortable/
+GxSimpleGrabPortable/
+
+# Local logs and transient runtime data
+logs/
+**/logs/
+*.log
+
+# IDE and OS noise
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+Thumbs.db
+Desktop.ini
+
+# Python cache
+__pycache__/
+*.pyc

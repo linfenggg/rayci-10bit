@@ -1,0 +1,118 @@
+﻿RayCi control dump
+generatedAt=2026-06-12T08:12:11
+processName=RayCi
+titleContains=
+view=Control
+maxDepth=6
+
+[0] name="RayCi 64bit V2.7.12 (lite edition)" type=ControlType.Window localized="window" class="Afx:00007FF7112A0000:8:0000000000010003:0000000000000000:00000000270F10A3" hwnd=0x005E0416 enabled=True offscreen=False rect=(152,152,1920,1117) patterns=TransformPatternIdentifiers.Pattern,WindowPatternIdentifiers.Pattern
+  [0/0] name="LiveMode: Options - CinCam CMOS 1201 EL" type=ControlType.Window localized="对话框" class="#32770" hwnd=0x019F0FD8 enabled=True offscreen=False rect=(986,420,630,653) patterns=TransformPatternIdentifiers.Pattern,WindowPatternIdentifiers.Pattern
+    [0/0/0] name="" type=ControlType.Tab localized="tab" id="1828" class="SysTabControl32" hwnd=0x011E10A4 enabled=True offscreen=False rect=(1004,502,594,555) patterns=ScrollPatternIdentifiers.Pattern,SelectionPatternIdentifiers.Pattern
+      [0/0/0/0] name="Selection" type=ControlType.TabItem localized="tab item" enabled=True offscreen=False rect=(1006,504,84,29) patterns=ScrollItemPatternIdentifiers.Pattern,SelectionItemPatternIdentifiers.Pattern
+      [0/0/0/1] name="Control" type=ControlType.TabItem localized="tab item" enabled=True offscreen=False rect=(1090,504,70,29) patterns=ScrollItemPatternIdentifiers.Pattern,SelectionItemPatternIdentifiers.Pattern
+      [0/0/0/2] name="Trigger" type=ControlType.TabItem localized="tab item" enabled=True offscreen=False rect=(1160,504,69,29) patterns=ScrollItemPatternIdentifiers.Pattern,SelectionItemPatternIdentifiers.Pattern
+    [0/0/1] name="" type=ControlType.DataGrid localized="data grid" id="1454" class="SysListView32" hwnd=0x00C8100A enabled=True offscreen=False rect=(1019,547,561,144) patterns=GridPatternIdentifiers.Pattern,MultipleViewPatternIdentifiers.Pattern,SelectionPatternIdentifiers.Pattern,TablePatternIdentifiers.Pattern
+      [0/0/1/0] name="标头" type=ControlType.Header localized="header" id="Header" class="SysHeader32" hwnd=0x04A21066 enabled=True offscreen=False rect=(1021,549,557,30)
+        [0/0/1/0/0] name="Beam Profiler" type=ControlType.HeaderItem localized="header item" id="HeaderItem 0" enabled=True offscreen=False rect=(1021,549,152,30) patterns=InvokePatternIdentifiers.Pattern
+        [0/0/1/0/1] name="Serial" type=ControlType.HeaderItem localized="header item" id="HeaderItem 1" enabled=True offscreen=False rect=(1189,549,109,30) patterns=InvokePatternIdentifiers.Pattern
+      [0/0/1/1] name="CinCam CMOS 1201 EL" type=ControlType.DataItem localized="item" enabled=True offscreen=False rect=(1021,579,285,28) patterns=SelectionItemPatternIdentifiers.Pattern
+        [0/0/1/1/0] name="CinCam CMOS 1201 EL" type=ControlType.Text localized="text" enabled=True offscreen=False rect=(1021,579,160,28) patterns=GridItemPatternIdentifiers.Pattern,TableItemPatternIdentifiers.Pattern
+        [0/0/1/1/1] name="1201EL-U2-1022-0034" type=ControlType.Text localized="text" enabled=True offscreen=False rect=(1181,579,125,28) patterns=GridItemPatternIdentifiers.Pattern,TableItemPatternIdentifiers.Pattern
+    [0/0/2] name="" type=ControlType.DataGrid localized="data grid" id="2284" class="SysListView32" hwnd=0x01F9113C enabled=True offscreen=False rect=(1019,691,561,132) patterns=GridPatternIdentifiers.Pattern,MultipleViewPatternIdentifiers.Pattern,SelectionPatternIdentifiers.Pattern,TablePatternIdentifiers.Pattern
+      [0/0/2/0] name="标头" type=ControlType.Header localized="header" id="Header" class="SysHeader32" hwnd=0x03190930 enabled=True offscreen=False rect=(1021,693,557,30)
+        [0/0/2/0/0] name="Accessory" type=ControlType.HeaderItem localized="header item" id="HeaderItem 0" enabled=True offscreen=False rect=(1021,693,152,30) patterns=InvokePatternIdentifiers.Pattern
+        [0/0/2/0/1] name="Wavelength Range" type=ControlType.HeaderItem localized="header item" id="HeaderItem 1" enabled=True offscreen=False rect=(1189,693,109,30) patterns=InvokePatternIdentifiers.Pattern
+      [0/0/2/1] name="plain" type=ControlType.DataItem localized="item" enabled=True offscreen=False rect=(1021,723,285,28) patterns=SelectionItemPatternIdentifiers.Pattern
+        [0/0/2/1/0] name="plain" type=ControlType.Text localized="text" enabled=True offscreen=False rect=(1021,723,160,28) patterns=GridItemPatternIdentifiers.Pattern,TableItemPatternIdentifiers.Pattern
+        [0/0/2/1/1] name="350 .. 1150" type=ControlType.Text localized="text" enabled=True offscreen=False rect=(1181,723,125,28) patterns=GridItemPatternIdentifiers.Pattern,TableItemPatternIdentifiers.Pattern
+    [0/0/3] name="Wavelength:" type=ControlType.Text localized="text" class="Static" hwnd=0x022D066C enabled=True offscreen=False rect=(1030,850,209,24)
+    [0/0/4] name="Wavelength:" type=ControlType.Spinner localized="spinner" id="1709" class="msctls_updown32" hwnd=0x00AD0FE2 enabled=True offscreen=False rect=(1261,835,253,42) patterns=RangeValuePatternIdentifiers.Pattern
+      [0/0/4/0] name="前进" type=ControlType.Button localized="button" id="SmallIncrement" enabled=True offscreen=False rect=(1487,835,27,21) patterns=InvokePatternIdentifiers.Pattern
+      [0/0/4/1] name="后退" type=ControlType.Button localized="button" id="SmallDecrement" enabled=True offscreen=False rect=(1487,856,27,21) patterns=InvokePatternIdentifiers.Pattern
+    [0/0/5] name="nm" type=ControlType.Text localized="text" class="Static" hwnd=0x044812E8 enabled=True offscreen=False rect=(1525,850,28,24)
+    [0/0/6] name="Identification Remark:" type=ControlType.Text localized="text" class="Static" hwnd=0x037F110E enabled=True offscreen=False rect=(1030,898,209,24)
+    [0/0/7] name="Identification Remark:" type=ControlType.Edit localized="edit" id="1357" class="Edit" hwnd=0x07B309F4 enabled=True offscreen=False rect=(1261,883,253,42) patterns=TextPatternIdentifiers.Pattern,ValuePatternIdentifiers.Pattern
+    [0/0/8] name="Identification Remark:" type=ControlType.Text localized="text" class="Static" hwnd=0x004110A0 enabled=True offscreen=False rect=(1008,931,537,2)
+    [0/0/9] name="Floating Average:" type=ControlType.Text localized="text" class="Static" hwnd=0x00EC10F2 enabled=True offscreen=False rect=(1030,958,209,24)
+    [0/0/10] name="Floating Average:" type=ControlType.Spinner localized="spinner" id="1678" class="msctls_updown32" hwnd=0x02041212 enabled=True offscreen=False rect=(1261,943,253,42) patterns=RangeValuePatternIdentifiers.Pattern
+      [0/0/10/0] name="前进" type=ControlType.Button localized="button" id="SmallIncrement" enabled=True offscreen=False rect=(1487,943,27,21) patterns=InvokePatternIdentifiers.Pattern
+      [0/0/10/1] name="后退" type=ControlType.Button localized="button" id="SmallDecrement" enabled=True offscreen=False rect=(1487,964,27,21) patterns=InvokePatternIdentifiers.Pattern
+    [0/0/11] name="Summing:" type=ControlType.Text localized="text" class="Static" hwnd=0x05F60D68 enabled=True offscreen=False rect=(1030,1003,209,24)
+    [0/0/12] name="Summing:" type=ControlType.Spinner localized="spinner" id="1679" class="msctls_updown32" hwnd=0x01E909A6 enabled=True offscreen=False rect=(1261,994,253,42) patterns=RangeValuePatternIdentifiers.Pattern
+      [0/0/12/0] name="前进" type=ControlType.Button localized="button" id="SmallIncrement" enabled=True offscreen=False rect=(1487,994,27,21) patterns=InvokePatternIdentifiers.Pattern
+      [0/0/12/1] name="后退" type=ControlType.Button localized="button" id="SmallDecrement" enabled=True offscreen=False rect=(1487,1015,27,21) patterns=InvokePatternIdentifiers.Pattern
+    [0/0/13] name="" type=ControlType.Tab localized="tab" id="12320" class="SysTabControl32" hwnd=0x02D71082 enabled=True offscreen=False rect=(1000,469,602,592) patterns=ScrollPatternIdentifiers.Pattern,SelectionPatternIdentifiers.Pattern
+      [0/0/13/0] name="Header" type=ControlType.TabItem localized="tab item" enabled=True offscreen=False rect=(1002,471,73,29) patterns=ScrollItemPatternIdentifiers.Pattern,SelectionItemPatternIdentifiers.Pattern
+      [0/0/13/1] name="Camera" type=ControlType.TabItem localized="tab item" enabled=True offscreen=False rect=(1075,471,76,29) patterns=ScrollItemPatternIdentifiers.Pattern,SelectionItemPatternIdentifiers.Pattern
+      [0/0/13/2] name="Units" type=ControlType.TabItem localized="tab item" enabled=True offscreen=False rect=(1151,471,54,29) patterns=ScrollItemPatternIdentifiers.Pattern,SelectionItemPatternIdentifiers.Pattern
+      [0/0/13/3] name="Calibration" type=ControlType.TabItem localized="tab item" enabled=True offscreen=False rect=(1205,471,105,29) patterns=ScrollItemPatternIdentifiers.Pattern,SelectionItemPatternIdentifiers.Pattern
+      [0/0/13/4] name="BeamWidth" type=ControlType.TabItem localized="tab item" enabled=True offscreen=False rect=(1310,471,111,29) patterns=ScrollItemPatternIdentifiers.Pattern,SelectionItemPatternIdentifiers.Pattern
+    [0/0/14] name="LiveMode: Options - CinCam CMOS 1201 EL" type=ControlType.TitleBar localized="title bar" id="TitleBar" enabled=True offscreen=False rect=(997,431,608,34)
+      [0/0/14/1] name="关闭" type=ControlType.Button localized="button" id="Close" enabled=True offscreen=False rect=(1581,422,32,32) patterns=InvokePatternIdentifiers.Pattern
+  [0/1] name="Workspace" type=ControlType.Pane localized="pane" id="59648" class="MDIClient" hwnd=0x05780C7E enabled=True offscreen=False rect=(163,270,1898,963)
+    [0/1/0] name="LiveMode: 2D-View (36%) - CinCam CMOS 1201 EL" type=ControlType.Window localized="window" id="65280" class="Afx:00007FF7112A0000:b:0000000000010003:0000000000000006:0000000002E213B9" hwnd=0x01621174 enabled=True offscreen=False rect=(165,272,600,460) patterns=TransformPatternIdentifiers.Pattern,WindowPatternIdentifiers.Pattern
+      [0/1/0/0] name="" type=ControlType.Pane localized="pane" id="59648" class="AfxFrameOrView120u" hwnd=0x04AC1172 enabled=True offscreen=False rect=(209,317,464,368)
+      [0/1/0/1] name="Rectangle" type=ControlType.RadioButton localized="radio button" id="1495" class="Button" hwnd=0x00FE10F6 enabled=True offscreen=False rect=(179,691,22,18) patterns=SelectionItemPatternIdentifiers.Pattern
+      [0/1/0/2] name="Ellipse" type=ControlType.RadioButton localized="radio button" id="1494" class="Button" hwnd=0x02190A3A enabled=True offscreen=False rect=(206,691,22,18) patterns=SelectionItemPatternIdentifiers.Pattern
+      [0/1/0/3] name="Reset" type=ControlType.RadioButton localized="radio button" id="1496" class="Button" hwnd=0x016612F0 enabled=True offscreen=False rect=(233,691,22,18) patterns=SelectionItemPatternIdentifiers.Pattern
+      [0/1/0/4] name="Background" type=ControlType.CheckBox localized="check box" id="32790" class="Button" hwnd=0x030907C4 enabled=False offscreen=False rect=(454,693,102,14) patterns=TogglePatternIdentifiers.Pattern
+      [0/1/0/5] name="Baseline" type=ControlType.CheckBox localized="check box" id="32783" class="Button" hwnd=0x02C11204 enabled=True offscreen=False rect=(567,693,76,14) patterns=TogglePatternIdentifiers.Pattern
+      [0/1/0/6] name="Flat Field" type=ControlType.CheckBox localized="check box" id="32794" class="Button" hwnd=0x05AB115E enabled=False offscreen=False rect=(654,693,82,14) patterns=TogglePatternIdentifiers.Pattern
+      [0/1/0/7] name="Linearity" type=ControlType.CheckBox localized="check box" id="32796" class="Button" hwnd=0x0677120E enabled=False offscreen=False rect=(747,693,79,14) patterns=TogglePatternIdentifiers.Pattern
+      [0/1/0/8] name="Auto" type=ControlType.CheckBox localized="check box" id="32905" class="Button" hwnd=0x04E80BEC enabled=True offscreen=False rect=(682,327,63,24) patterns=TogglePatternIdentifiers.Pattern
+      [0/1/0/9] name="" type=ControlType.Pane localized="Rebar" id="59396" class="ReBarWindow32" hwnd=0x0082118C enabled=True offscreen=False rect=(176,317,33,368)
+        [0/1/0/9/0] name="" type=ControlType.ToolBar localized="tool bar" id="59392" class="ToolbarWindow32" hwnd=0x02780BF2 enabled=True offscreen=False rect=(176,321,33,362)
+          [0/1/0/9/0/0] name="Background Calibration" type=ControlType.Button localized="button" id="Item 32787" enabled=True offscreen=False rect=(177,326,31,31) patterns=InvokePatternIdentifiers.Pattern
+          [0/1/0/9/0/1] name="Single Measurement" type=ControlType.Button localized="button" id="Item 33010" enabled=True offscreen=False rect=(177,357,31,31) patterns=InvokePatternIdentifiers.Pattern
+          [0/1/0/9/0/2] name="Snapshot" type=ControlType.Button localized="button" id="Item 32813" enabled=True offscreen=False rect=(177,388,31,31) patterns=InvokePatternIdentifiers.Pattern
+          [0/1/0/9/0/3] name="AOI Adjustment" type=ControlType.Button localized="button" id="Item 32868" enabled=True offscreen=False rect=(177,425,31,31) patterns=TogglePatternIdentifiers.Pattern
+          [0/1/0/9/0/4] name="Show Coordinate System" type=ControlType.Button localized="button" id="Item 33469" enabled=True offscreen=False rect=(177,462,31,31) patterns=TogglePatternIdentifiers.Pattern
+          [0/1/0/9/0/5] name="Zoom" type=ControlType.Button localized="button" id="Item 32977" enabled=True offscreen=False rect=(177,493,31,31) patterns=InvokePatternIdentifiers.Pattern
+          [0/1/0/9/0/6] name="Cross Section" type=ControlType.Button localized="button" id="Item 32967" enabled=True offscreen=False rect=(177,530,31,31) patterns=InvokePatternIdentifiers.Pattern
+          [0/1/0/9/0/7] name="Beam Results" type=ControlType.Button localized="button" id="Item 32975" enabled=True offscreen=False rect=(177,561,31,31) patterns=InvokePatternIdentifiers.Pattern
+          [0/1/0/9/0/8] name="Beam Profiler Dynamic" type=ControlType.Button localized="button" id="Item 33464" enabled=True offscreen=False rect=(177,592,31,31) patterns=InvokePatternIdentifiers.Pattern
+      [0/1/0/10] name="LiveMode: 2D-View (36%) - CinCam CMOS 1201 EL" type=ControlType.TitleBar localized="title bar" id="TitleBar" enabled=True offscreen=False rect=(176,283,578,34)
+        [0/1/0/10/0] name="系统菜单栏" type=ControlType.MenuBar localized="menu bar" id="SystemMenuBar" enabled=True offscreen=False rect=(176,283,33,33)
+          [0/1/0/10/0/0] name="系统" type=ControlType.MenuItem localized="menu item" id="Item 1" enabled=True offscreen=False rect=(176,283,33,33) patterns=ExpandCollapsePatternIdentifiers.Pattern
+        [0/1/0/10/1] name="最小化" type=ControlType.Button localized="button" id="Minimize" enabled=True offscreen=False rect=(598,285,50,29) patterns=InvokePatternIdentifiers.Pattern
+        [0/1/0/10/2] name="最大化" type=ControlType.Button localized="button" id="Maximize" enabled=True offscreen=False rect=(650,285,50,29) patterns=InvokePatternIdentifiers.Pattern
+        [0/1/0/10/3] name="关闭" type=ControlType.Button localized="button" id="Close" enabled=True offscreen=False rect=(702,285,50,29) patterns=InvokePatternIdentifiers.Pattern
+  [0/2] name="Main Toolbar" type=ControlType.ToolBar localized="tool bar" id="59392" class="ToolbarWindow32" hwnd=0x01380CA4 enabled=True offscreen=False rect=(161,227,555,45)
+    [0/2/0] name="Open LiveMode" type=ControlType.Button localized="button" id="Item 32998" enabled=False offscreen=False rect=(173,230,39,39) patterns=InvokePatternIdentifiers.Pattern
+    [0/2/1] name="Open" type=ControlType.Button localized="button" id="Item 57601" enabled=True offscreen=False rect=(212,230,39,39) patterns=InvokePatternIdentifiers.Pattern
+    [0/2/2] name="Save Data" type=ControlType.Button localized="button" id="Item 57603" enabled=False offscreen=False rect=(251,230,39,39) patterns=InvokePatternIdentifiers.Pattern
+    [0/2/3] name="Export Workspace" type=ControlType.Button localized="button" id="Item 33551" enabled=True offscreen=False rect=(290,230,39,39) patterns=InvokePatternIdentifiers.Pattern
+    [0/2/4] name="Undo" type=ControlType.SplitButton localized="split button" id="Item 57643" enabled=False offscreen=False rect=(335,230,62,39) patterns=InvokePatternIdentifiers.Pattern
+    [0/2/5] name="Redo" type=ControlType.SplitButton localized="split button" id="Item 57644" enabled=False offscreen=False rect=(397,230,62,39) patterns=InvokePatternIdentifiers.Pattern
+    [0/2/6] name="Options Window" type=ControlType.Button localized="button" id="Item 32971" enabled=True offscreen=False rect=(465,230,39,39) patterns=TogglePatternIdentifiers.Pattern
+    [0/2/7] name="Messages Window" type=ControlType.Button localized="button" id="Item 32970" enabled=True offscreen=False rect=(504,230,39,39) patterns=TogglePatternIdentifiers.Pattern
+    [0/2/8] name="Global Settings" type=ControlType.Button localized="button" id="Item 32882" enabled=True offscreen=False rect=(543,230,39,39) patterns=TogglePatternIdentifiers.Pattern
+    [0/2/9] name="Tile Windows" type=ControlType.Button localized="button" id="Item 57651" enabled=True offscreen=False rect=(588,230,39,39) patterns=InvokePatternIdentifiers.Pattern
+    [0/2/10] name="Cascade Windows" type=ControlType.Button localized="button" id="Item 57650" enabled=True offscreen=False rect=(627,230,39,39) patterns=InvokePatternIdentifiers.Pattern
+    [0/2/11] name="About" type=ControlType.Button localized="button" id="Item 57664" enabled=True offscreen=False rect=(672,230,39,39) patterns=InvokePatternIdentifiers.Pattern
+  [0/3] name="Ready" type=ControlType.StatusBar localized="status bar" id="StatusBar" class="msctls_statusbar32" hwnd=0x04A20FF8 enabled=True offscreen=False rect=(163,1233,1898,25) patterns=GridPatternIdentifiers.Pattern
+    [0/3/0] name="Ready" type=ControlType.Edit localized="edit" id="StatusBar.Pane0" enabled=True offscreen=False rect=(163,1235,683,23) patterns=GridItemPatternIdentifiers.Pattern,ValuePatternIdentifiers.Pattern
+    [0/3/1] name="CinCam CMOS 1201 EL" type=ControlType.Edit localized="edit" id="StatusBar.Pane1" enabled=True offscreen=False rect=(848,1235,246,23) patterns=GridItemPatternIdentifiers.Pattern,ValuePatternIdentifiers.Pattern
+    [0/3/2] name="10bpp (Y16): 1280 x 1024 at 14.0 fps" type=ControlType.Edit localized="edit" id="StatusBar.Pane2" enabled=True offscreen=False rect=(1096,1235,290,23) patterns=GridItemPatternIdentifiers.Pattern,ValuePatternIdentifiers.Pattern
+    [0/3/3] name="Min:   0 %" type=ControlType.Edit localized="edit" id="StatusBar.Pane3" enabled=True offscreen=False rect=(1388,1235,118,23) patterns=GridItemPatternIdentifiers.Pattern,ValuePatternIdentifiers.Pattern
+    [0/3/4] name="Max:  38 %" type=ControlType.Edit localized="edit" id="StatusBar.Pane4" enabled=True offscreen=False rect=(1508,1235,118,23) patterns=GridItemPatternIdentifiers.Pattern,ValuePatternIdentifiers.Pattern
+    [0/3/5] name="" type=ControlType.Edit localized="edit" id="StatusBar.Pane5" enabled=True offscreen=False rect=(1628,1235,132,23) patterns=GridItemPatternIdentifiers.Pattern,ValuePatternIdentifiers.Pattern
+    [0/3/6] name="Mem: 252.1 MB" type=ControlType.Edit localized="edit" id="StatusBar.Pane6" enabled=True offscreen=False rect=(1762,1235,160,23) patterns=GridItemPatternIdentifiers.Pattern,ValuePatternIdentifiers.Pattern
+    [0/3/7] name="CPU:  2%" type=ControlType.Edit localized="edit" id="StatusBar.Pane7" enabled=True offscreen=False rect=(1924,1235,109,23) patterns=GridItemPatternIdentifiers.Pattern,ValuePatternIdentifiers.Pattern
+    [0/3/8] name="" type=ControlType.Custom localized="底框" id="StatusBar.Grip" enabled=True offscreen=False rect=(2037,1234,24,24)
+  [0/4] name="RayCi 64bit V2.7.12 (lite edition)" type=ControlType.TitleBar localized="title bar" id="TitleBar" enabled=True offscreen=False rect=(163,163,1898,34)
+    [0/4/0] name="系统菜单栏" type=ControlType.MenuBar localized="menu bar" id="SystemMenuBar" enabled=True offscreen=False rect=(163,163,33,33)
+      [0/4/0/0] name="系统" type=ControlType.MenuItem localized="menu item" id="Item 1" enabled=True offscreen=False rect=(163,163,33,33) patterns=ExpandCollapsePatternIdentifiers.Pattern
+    [0/4/1] name="最小化" type=ControlType.Button localized="button" id="Minimize" enabled=True offscreen=False rect=(1850,153,71,44) patterns=InvokePatternIdentifiers.Pattern
+    [0/4/2] name="最大化" type=ControlType.Button localized="button" id="Maximize" enabled=True offscreen=False rect=(1921,153,70,44) patterns=InvokePatternIdentifiers.Pattern
+    [0/4/3] name="关闭" type=ControlType.Button localized="button" id="Close" enabled=True offscreen=False rect=(1991,153,71,44) patterns=InvokePatternIdentifiers.Pattern
+  [0/5] name="应用程序" type=ControlType.MenuBar localized="menu bar" id="MenuBar" enabled=True offscreen=False rect=(163,197,1898,29)
+    [0/5/0] name="File" type=ControlType.MenuItem localized="menu item" id="Item 1" enabled=True offscreen=False rect=(163,197,62,29) patterns=ExpandCollapsePatternIdentifiers.Pattern
+    [0/5/1] name="Edit" type=ControlType.MenuItem localized="menu item" id="Item 2" enabled=True offscreen=False rect=(225,197,66,29) patterns=ExpandCollapsePatternIdentifiers.Pattern
+    [0/5/2] name="Processing" type=ControlType.MenuItem localized="menu item" id="Item 3" enabled=True offscreen=False rect=(291,197,124,29) patterns=ExpandCollapsePatternIdentifiers.Pattern
+    [0/5/3] name="Calibration" type=ControlType.MenuItem localized="menu item" id="Item 4" enabled=True offscreen=False rect=(415,197,127,29) patterns=ExpandCollapsePatternIdentifiers.Pattern
+    [0/5/4] name="Measurement" type=ControlType.MenuItem localized="menu item" id="Item 5" enabled=True offscreen=False rect=(542,197,151,29) patterns=ExpandCollapsePatternIdentifiers.Pattern
+    [0/5/5] name="Extras" type=ControlType.MenuItem localized="menu item" id="Item 6" enabled=True offscreen=False rect=(693,197,83,29) patterns=ExpandCollapsePatternIdentifiers.Pattern
+    [0/5/6] name="View" type=ControlType.MenuItem localized="menu item" id="Item 7" enabled=True offscreen=False rect=(776,197,73,29) patterns=ExpandCollapsePatternIdentifiers.Pattern
+    [0/5/7] name="Window" type=ControlType.MenuItem localized="menu item" id="Item 8" enabled=True offscreen=False rect=(849,197,103,29) patterns=ExpandCollapsePatternIdentifiers.Pattern
+    [0/5/8] name="Help" type=ControlType.MenuItem localized="menu item" id="Item 9" enabled=True offscreen=False rect=(952,197,73,29) patterns=ExpandCollapsePatternIdentifiers.Pattern

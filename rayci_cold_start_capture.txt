@@ -1,0 +1,39 @@
+Bus Hound 6.00 capture on Windows Vista (x64). Complements of www.perisoft.net
+
+  Device - Device ID (followed by the endpoint for USB devices)
+            (6) USB Root Hub (USB 3.0)
+            (8) USB Mass Storage Device
+            (10) USB2.0 Digital Camera
+            (11) USB Composite Device
+            (15) Generic Flash Disk [ROM=8.07]
+            (20) EarPods
+            (21) USB Input Device
+            (22) USB Input Device
+            (28) HID-compliant consumer control device
+            (29) HID-compliant vendor-defined device
+            (31) HID Keyboard Device
+            (32) HID-compliant consumer control device
+            (33) HID-compliant system controller
+            (34) HID-compliant vendor-defined device
+            (35) HID-compliant vendor-defined device
+            (37) HID Keyboard Device
+            (38) HID-compliant mouse
+            (39) HID-compliant mouse
+  Address - FireWire async address or channel number
+  Length - Total transfer length
+  Phase  - Phase Type
+            ASTS  ATA task file status       NTSTS NTSTATUS value
+            ATA   ATA task file command      OUT   Data out transfer
+            BRB   Bluetooth request block    RESET bus reset
+            CMD   SCSI/ATAPI command         SENSE SCSI sense data
+            CTL   USB control transfer       SSTS  SCSI request block status
+            IN    Data in transfer           USTS  USB status
+            ISOC  Isochronous transfer       ok    command complete
+            LOCK  FireWire lock transaction
+  Data   - Hex dump of the data transferred
+  Delta  - Elapsed time from the previous phase to the current phase
+  Cmd... - Position in the captured data
+
+
+Device  Address              Length    Phase  Data                      Delta  Cmd.Phase.Ofs(rep)
+------  -------------------  --------  -----  ------------------------  -----  ------------------
