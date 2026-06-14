@@ -10,9 +10,14 @@ internal static unsafe partial class Exports
 
     private static void TraceExport(string message, int limit = 64)
     {
+        if (!VirtualCameraState.IsVerboseDebugLoggingEnabled())
+        {
+            return;
+        }
+
         if (System.Threading.Interlocked.Increment(ref _exportTraceCount) <= limit)
         {
-            VirtualCameraState.Log(message);
+            VirtualCameraState.DebugLog(message);
         }
     }
 
@@ -69,7 +74,10 @@ internal static unsafe partial class Exports
         }
 
         VirtualCameraState.FillCameraList(cameraList);
-        VirtualCameraState.Log("is_GetCameraList -> 1 camera");
+        if (VirtualCameraState.IsVerboseDebugLoggingEnabled())
+        {
+            VirtualCameraState.DebugLog("is_GetCameraList -> 1 camera");
+        }
         return VirtualCameraState.SetLastError(UeyeNative.IS_SUCCESS, "OK");
     }
 
@@ -83,7 +91,7 @@ internal static unsafe partial class Exports
     public static int IsGetCameraInfo(uint cameraHandle, BOARDINFO* info)
     {
         VirtualCameraState.FillBoardInfo(info);
-        VirtualCameraState.Log("is_GetCameraInfo -> OK");
+        VirtualCameraState.DebugLog("is_GetCameraInfo -> OK");
         return VirtualCameraState.SetLastError(UeyeNative.IS_SUCCESS, "OK");
     }
 
@@ -91,7 +99,7 @@ internal static unsafe partial class Exports
     public static int IsGetBoardInfo(uint cameraHandle, BOARDINFO* info)
     {
         VirtualCameraState.FillBoardInfo(info);
-        VirtualCameraState.Log("is_GetBoardInfo -> OK");
+        VirtualCameraState.DebugLog("is_GetBoardInfo -> OK");
         return VirtualCameraState.SetLastError(UeyeNative.IS_SUCCESS, "OK");
     }
 
@@ -99,7 +107,7 @@ internal static unsafe partial class Exports
     public static int IsGetSensorInfo(uint cameraHandle, SENSORINFO* info)
     {
         VirtualCameraState.FillSensorInfo(info);
-        VirtualCameraState.Log("is_GetSensorInfo -> OK");
+        VirtualCameraState.DebugLog("is_GetSensorInfo -> OK");
         return VirtualCameraState.SetLastError(UeyeNative.IS_SUCCESS, "OK");
     }
 
@@ -368,7 +376,7 @@ internal static unsafe partial class Exports
             _waitReturnTraceCount++;
             var resolvedMemoryId = memoryId == null ? 0 : *memoryId;
             var resolvedPointer = memory == null ? nint.Zero : (nint)(*memory);
-            VirtualCameraState.Log($"is_WaitForNextImage(timeout={timeout}) -> result={result}, memoryId={resolvedMemoryId}, ptr=0x{resolvedPointer.ToInt64():X}");
+            VirtualCameraState.DebugLog($"is_WaitForNextImage(timeout={timeout}) -> result={result}, memoryId={resolvedMemoryId}, ptr=0x{resolvedPointer.ToInt64():X}");
         }
 
         return result;
@@ -460,35 +468,35 @@ internal static unsafe partial class Exports
     [UnmanagedCallersOnly(EntryPoint = "is_EnableEvent")]
     public static int IsEnableEvent(uint cameraHandle, int which)
     {
-        VirtualCameraState.Log($"is_EnableEvent(which={which})");
+        VirtualCameraState.DebugLog($"is_EnableEvent(which={which})");
         return VirtualCameraState.EnableEvent(which);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "is_DisableEvent")]
     public static int IsDisableEvent(uint cameraHandle, int which)
     {
-        VirtualCameraState.Log($"is_DisableEvent(which={which})");
+        VirtualCameraState.DebugLog($"is_DisableEvent(which={which})");
         return VirtualCameraState.DisableEvent(which);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "is_InitEvent")]
     public static int IsInitEvent(uint cameraHandle, nint hEvent, int which)
     {
-        VirtualCameraState.Log($"is_InitEvent(which={which}, hEvent=0x{hEvent.ToInt64():X})");
+        VirtualCameraState.DebugLog($"is_InitEvent(which={which}, hEvent=0x{hEvent.ToInt64():X})");
         return VirtualCameraState.InitEvent(hEvent, which);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "is_ExitEvent")]
     public static int IsExitEvent(uint cameraHandle, int which)
     {
-        VirtualCameraState.Log($"is_ExitEvent(which={which})");
+        VirtualCameraState.DebugLog($"is_ExitEvent(which={which})");
         return VirtualCameraState.ExitEvent(which);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "is_EnableMessage")]
     public static int IsEnableMessage(uint cameraHandle, int which, nint hwnd)
     {
-        VirtualCameraState.Log($"is_EnableMessage(which={which}, hwnd=0x{hwnd.ToInt64():X})");
+        VirtualCameraState.DebugLog($"is_EnableMessage(which={which}, hwnd=0x{hwnd.ToInt64():X})");
         return VirtualCameraState.SetLastError(UeyeNative.IS_SUCCESS, "OK");
     }
 
@@ -520,28 +528,31 @@ internal static unsafe partial class Exports
     [UnmanagedCallersOnly(EntryPoint = "is_DeviceInfo")]
     public static int IsDeviceInfo(uint cameraHandle, uint command, void* parameter, uint parameterSize)
     {
-        VirtualCameraState.Log($"is_DeviceInfo(command={command}, size={parameterSize})");
+        if (VirtualCameraState.IsVerboseDebugLoggingEnabled())
+        {
+            VirtualCameraState.DebugLog($"is_DeviceInfo(command={command}, size={parameterSize})");
+        }
         return VirtualCameraState.FillDeviceInfo(command, parameter, parameterSize);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "is_DeviceFeature")]
     public static int IsDeviceFeature(uint cameraHandle, uint command, void* parameter, uint parameterSize)
     {
-        VirtualCameraState.Log($"is_DeviceFeature(command={command}, size={parameterSize})");
+        VirtualCameraState.DebugLog($"is_DeviceFeature(command={command}, size={parameterSize})");
         return VirtualCameraState.HandleDeviceFeature(command, parameter, parameterSize);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "is_Configuration")]
     public static int IsConfiguration(uint command, void* parameter, uint parameterSize)
     {
-        VirtualCameraState.Log($"is_Configuration(command={command}, size={parameterSize})");
+        VirtualCameraState.DebugLog($"is_Configuration(command={command}, size={parameterSize})");
         return VirtualCameraState.HandleConfiguration(command, parameter, parameterSize);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "is_IO")]
     public static int IsIo(uint cameraHandle, uint command, void* parameter, uint parameterSize)
     {
-        VirtualCameraState.Log($"is_IO(command={command}, size={parameterSize})");
+        VirtualCameraState.DebugLog($"is_IO(command={command}, size={parameterSize})");
         return VirtualCameraState.ZeroCommand(parameter, parameterSize);
     }
 
@@ -583,7 +594,7 @@ internal static unsafe partial class Exports
         if (_sequenceReturnTraceCount < 256)
         {
             _sequenceReturnTraceCount++;
-            VirtualCameraState.Log($"is_LockSeqBuf(memoryId={memoryId}) -> result={result}");
+            VirtualCameraState.DebugLog($"is_LockSeqBuf(memoryId={memoryId}) -> result={result}");
         }
 
         return result;
@@ -597,7 +608,7 @@ internal static unsafe partial class Exports
         if (_sequenceReturnTraceCount < 256)
         {
             _sequenceReturnTraceCount++;
-            VirtualCameraState.Log($"is_UnlockSeqBuf(memoryId={memoryId}) -> result={result}");
+            VirtualCameraState.DebugLog($"is_UnlockSeqBuf(memoryId={memoryId}) -> result={result}");
         }
 
         return result;
@@ -620,7 +631,7 @@ internal static unsafe partial class Exports
     [UnmanagedCallersOnly(EntryPoint = "is_GetNumberOfMemoryImages")]
     public static int IsGetNumberOfMemoryImages(uint cameraHandle, int* count)
     {
-        VirtualCameraState.Log("is_GetNumberOfMemoryImages");
+        VirtualCameraState.DebugLog("is_GetNumberOfMemoryImages");
         if (count != null)
         {
             *count = VirtualCameraState.GetMemoryImageCount();
@@ -631,13 +642,13 @@ internal static unsafe partial class Exports
 
     private static int Unsupported(string name)
     {
-        VirtualCameraState.Log($"{name} -> IS_NOT_SUPPORTED");
+        VirtualCameraState.DebugLog($"{name} -> IS_NOT_SUPPORTED");
         return VirtualCameraState.SetLastError(UeyeNative.IS_NOT_SUPPORTED, $"{name} is not supported by the virtual camera.");
     }
 
     private static int SuccessNoOp(string name)
     {
-        VirtualCameraState.Log($"{name} -> OK (no-op)");
+        VirtualCameraState.DebugLog($"{name} -> OK (no-op)");
         return VirtualCameraState.SetLastError(UeyeNative.IS_SUCCESS, "OK");
     }
 }

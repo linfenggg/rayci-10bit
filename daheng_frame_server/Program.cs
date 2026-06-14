@@ -16,6 +16,9 @@ internal sealed class DahengFrameServerApp
     private const double Mer13030UmUsb2NominalFrameRateIncHz = 0.1;
     private static readonly string LogDirectory = ResolveLogDirectory();
     private static readonly string LogPath = Path.Combine(LogDirectory, "daheng_frame_server.log");
+    private static readonly object LogGate = new();
+    private static readonly bool VerboseDebugLoggingEnabled = GetEnvironmentBool("ULTRON_RAYCI_VERBOSE_DEBUG_LOG", false);
+    private static StreamWriter? _logWriter;
     private const double DefaultStartupFrameRate = 15.0;
     private const double DefaultStartupExposureUs = 30000.0;
     private const double DefaultStartupGainDb = 0.0;
@@ -1200,7 +1203,7 @@ internal sealed class DahengFrameServerApp
 
         state = appliedState;
         _lastAppliedRequestSequence = requestSequence;
-        Log($"applied synthetic controls seq={requestSequence} exposureUs={appliedState.ExposureUs:F2} gainDb={appliedState.GainDb:F2} blackLevel={appliedState.BlackLevel} frameRateHz={appliedState.FrameRateHz:F3} capturePixelFormat={appliedState.CapturePixelFormat} size={appliedState.Width}x{appliedState.Height} offset={appliedState.OffsetX},{appliedState.OffsetY} binning={appliedState.BinningX}x{appliedState.BinningY} flags=0x{appliedState.Flags:X}");
+        DebugLog($"applied synthetic controls seq={requestSequence} exposureUs={appliedState.ExposureUs:F2} gainDb={appliedState.GainDb:F2} blackLevel={appliedState.BlackLevel} frameRateHz={appliedState.FrameRateHz:F3} capturePixelFormat={appliedState.CapturePixelFormat} size={appliedState.Width}x{appliedState.Height} offset={appliedState.OffsetX},{appliedState.OffsetY} binning={appliedState.BinningX}x{appliedState.BinningY} flags=0x{appliedState.Flags:X}");
     }
 
     private void ApplyPendingControls(IGXFeatureControl remote, IGXStream stream, MemoryMappedViewAccessor accessor, Mutex frameMutex)
@@ -1366,7 +1369,7 @@ internal sealed class DahengFrameServerApp
         var currentFrameRateText = TryReadCurrentFrameRateHz(remote, out var currentFrameRateHz)
             ? $" currentFrameRateHz={currentFrameRateHz:F3}"
             : string.Empty;
-        Log($"applied controls seq={requestSequence} exposureUs={appliedState.ExposureUs:F2} gainDb={appliedState.GainDb:F2} blackLevel={appliedState.BlackLevel} frameRateHz={appliedState.FrameRateHz:F3}{currentFrameRateText} capturePixelFormat={appliedState.CapturePixelFormat} size={appliedState.Width}x{appliedState.Height} offset={appliedState.OffsetX},{appliedState.OffsetY} binning={appliedState.BinningX}x{appliedState.BinningY} flags=0x{appliedState.Flags:X} supports12bit={appliedState.PixelFormatCapabilityFlags != 0}");
+        DebugLog($"applied controls seq={requestSequence} exposureUs={appliedState.ExposureUs:F2} gainDb={appliedState.GainDb:F2} blackLevel={appliedState.BlackLevel} frameRateHz={appliedState.FrameRateHz:F3}{currentFrameRateText} capturePixelFormat={appliedState.CapturePixelFormat} size={appliedState.Width}x{appliedState.Height} offset={appliedState.OffsetX},{appliedState.OffsetY} binning={appliedState.BinningX}x{appliedState.BinningY} flags=0x{appliedState.Flags:X} supports12bit={appliedState.PixelFormatCapabilityFlags != 0}");
     }
 
     private BridgeControlState CreateSimulationControlState()
@@ -1696,7 +1699,7 @@ internal sealed class DahengFrameServerApp
                         preview.Append(sourceWords[i].ToString("X4"));
                     }
                     preview.Append(']');
-                    Log(preview.ToString());
+                    DebugLog(preview.ToString());
                 }
 
                 var source = (ushort*)buffer.ToPointer();
@@ -1780,7 +1783,7 @@ internal sealed class DahengFrameServerApp
         }
 
         var mean = sum / (double)count;
-        Log($"mono stats source={source} pixelFormat={pixelFormat} bitDepth={bitDepth} min=0x{min:X4} max=0x{max:X4} mean={mean:F2} nonZero={nonZero}/{count}");
+        DebugLog($"mono stats source={source} pixelFormat={pixelFormat} bitDepth={bitDepth} min=0x{min:X4} max=0x{max:X4} mean={mean:F2} nonZero={nonZero}/{count}");
     }
 
     private static bool TryGetNativeMonoBitDepth(GX_PIXEL_FORMAT_ENTRY pixelFormat, out int bitDepth)
@@ -2076,7 +2079,7 @@ internal sealed class DahengFrameServerApp
             ? $" currentFrameRateHz={currentFrameRateHz:F2}"
             : string.Empty;
         var line = $"capabilities currentPixelFormat={currentPixelFormat} supports12bit={supports12Bit} pixelFormats=[{string.Join(", ", pixelFormats)}] size={width}x{height} offset={offsetX},{offsetY} sampling={binningX}x{binningY} reverse={reverseX},{reverseY} exposureUs={exposure.Value:F2} range={exposure.Min:F2}..{exposure.Max:F2} gainDb={gain.Value:F2} range={gain.Min:F2}..{gain.Max:F2}{blackLevelText} frameRateHz={frameRate.Value:F2} range={frameRate.Min:F2}..{frameRate.Max:F2} inc={frameRate.Increment:F3}{currentFrameRateText}";
-        Log(line);
+        DebugLog(line);
         sink?.Invoke(line);
     }
 
@@ -2106,7 +2109,7 @@ internal sealed class DahengFrameServerApp
                 ? $" currentFrameRate={currentFrameRateHz:F3}"
                 : string.Empty;
             var line = $"pixelFormat={candidate} frameRate={state.Value:F3} range={state.Min:F3}..{state.Max:F3} inc={state.Increment:F3}{currentFrameRateText}";
-            Log(line);
+            DebugLog(line);
             sink?.Invoke(line);
         }
 
@@ -2171,7 +2174,7 @@ internal sealed class DahengFrameServerApp
             ? ReadEnumValue(remote, "PixelFormat")
             : "Mono8";
 
-        Log($"selected pixel format: {selected}");
+        DebugLog($"selected pixel format: {selected}");
     }
 
     private static bool TrySetCapturePixelFormat(IGXFeatureControl remote, int capturePixelFormat)
@@ -2185,7 +2188,7 @@ internal sealed class DahengFrameServerApp
         var success = TrySetEnum(remote, "PixelFormat", candidates);
         if (success)
         {
-            Log($"requested capture pixel format={capturePixelFormat} selected={ReadEnumValue(remote, "PixelFormat")}");
+            DebugLog($"requested capture pixel format={capturePixelFormat} selected={ReadEnumValue(remote, "PixelFormat")}");
         }
 
         return success;
@@ -2671,7 +2674,7 @@ internal sealed class DahengFrameServerApp
         }
         catch (Exception ex) when (IsNonFatalCommandError(featureName, ex))
         {
-            Log($"ignoring non-fatal {featureName} error: {ex.Message}");
+            DebugLog($"ignoring non-fatal {featureName} error: {ex.Message}");
         }
     }
 
@@ -2688,7 +2691,7 @@ internal sealed class DahengFrameServerApp
         }
         catch (Exception ex) when (IsNonFatalCommandError(featureName, ex))
         {
-            Log($"ignoring non-fatal {featureName} error: {ex.Message}");
+            DebugLog($"ignoring non-fatal {featureName} error: {ex.Message}");
         }
     }
 
@@ -3085,12 +3088,39 @@ internal sealed class DahengFrameServerApp
     {
         try
         {
-            File.AppendAllText(LogPath, $"[{DateTime.Now:HH:mm:ss.fff}] {message}{Environment.NewLine}");
+            lock (LogGate)
+            {
+                _logWriter ??= CreateLogWriter();
+                _logWriter.Write('[');
+                _logWriter.Write(DateTime.Now.ToString("HH:mm:ss.fff"));
+                _logWriter.Write("] ");
+                _logWriter.WriteLine(message);
+                _logWriter.Flush();
+            }
         }
         catch
         {
             // Logging must not crash the helper.
         }
+    }
+
+    private static void DebugLog(string message)
+    {
+        if (!VerboseDebugLoggingEnabled)
+        {
+            return;
+        }
+
+        Log(message);
+    }
+
+    private static StreamWriter CreateLogWriter()
+    {
+        var stream = new FileStream(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 4096, FileOptions.SequentialScan);
+        return new StreamWriter(stream)
+        {
+            AutoFlush = false,
+        };
     }
 
     private sealed class Releaser(Mutex mutex) : IDisposable

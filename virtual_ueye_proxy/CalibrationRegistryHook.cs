@@ -48,6 +48,7 @@ internal static unsafe class CalibrationRegistryHook
     private static readonly string ListedReverseFullCameraKeyName = ListedSerialKeyName + SensorKeyName;
     private static readonly RegistryNode VirtualHklm = BuildVirtualRegistryTree();
     private const bool EnableVirtualRegistry = false;
+    private static readonly bool VerboseRegistryTraceEnabled = IsTruthyEnvironmentVariable("ULTRON_RAYCI_VERBOSE_REGISTRY_LOG");
     private const string BaseCalibrationName = "CinCam CMOS 1201";
     private const string Base1201ExposureTimesCsv = "100,200,300,450,700,1000,1500,2000,3000,4500,7000,10000,15000,20000,30000,45000,70000,100000,140000";
     private const string RayCiElExposureTimesCsv = CapturedCameraProfile.ExposureTimesCsv;
@@ -1442,6 +1443,11 @@ internal static unsafe class CalibrationRegistryHook
 
     private static void Trace(string message)
     {
+        if (!VerboseRegistryTraceEnabled)
+        {
+            return;
+        }
+
         lock (Gate)
         {
             if (_traceCount >= 4096)
@@ -1453,6 +1459,15 @@ internal static unsafe class CalibrationRegistryHook
         }
 
         VirtualCameraState.Log("CalibrationRegistryHook: " + message);
+    }
+
+    private static bool IsTruthyEnvironmentVariable(string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
     }
 
     private static RegistryNode BuildVirtualRegistryTree()

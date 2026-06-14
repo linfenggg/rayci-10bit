@@ -68,6 +68,8 @@ internal static unsafe class VirtualCameraState
     private const double CompatibleFrameRateIncHz = 0.1;
 
     private static readonly object Gate = new();
+    private static readonly object LogGate = new();
+    private static readonly bool VerboseDebugLoggingEnabled = IsTruthyEnvironmentVariable("ULTRON_RAYCI_VERBOSE_DEBUG_LOG");
     private static readonly double[] RayCiGainStepsDb = [0.0, 4.0, 8.0, 12.0, 16.0];
     private static readonly Dictionary<int, ImageMemory> Memories = new();
     private static readonly Dictionary<int, ulong> MemoryFrameNumbers = new();
@@ -82,6 +84,7 @@ internal static unsafe class VirtualCameraState
     private static readonly string LogDirectory = ResolveLogDirectory();
     private static readonly string LogPath = Path.Combine(LogDirectory, "ueye_proxy.log");
     private static readonly string IdentityReportPath = Path.Combine(LogDirectory, "bridge_identity_report.txt");
+    private static StreamWriter? _logWriter;
     private static int _bridgeMissTraceCount;
 
     private enum FrameRateRequestEncoding
@@ -174,17 +177,67 @@ internal static unsafe class VirtualCameraState
 
     public static void Log(string message)
     {
+        if (!VerboseDebugLoggingEnabled)
+        {
+            return;
+        }
+
+        WriteLog(message);
+    }
+
+    public static void AlwaysLog(string message)
+    {
+        WriteLog(message);
+    }
+
+    public static void DebugLog(string message)
+    {
+        if (!VerboseDebugLoggingEnabled)
+        {
+            return;
+        }
+
+        WriteLog(message);
+    }
+
+    private static void WriteLog(string message)
+    {
         try
         {
-            lock (Gate)
+            lock (LogGate)
             {
-                File.AppendAllText(LogPath, $"[{DateTime.Now:HH:mm:ss.fff}] {message}{Environment.NewLine}");
+                _logWriter ??= CreateLogWriter();
+                _logWriter.Write('[');
+                _logWriter.Write(DateTime.Now.ToString("HH:mm:ss.fff"));
+                _logWriter.Write("] ");
+                _logWriter.WriteLine(message);
+                _logWriter.Flush();
             }
         }
         catch
         {
             // Logging must never break exported calls.
         }
+    }
+
+    public static bool IsVerboseDebugLoggingEnabled() => VerboseDebugLoggingEnabled;
+
+    private static StreamWriter CreateLogWriter()
+    {
+        var stream = new FileStream(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 4096, FileOptions.SequentialScan);
+        return new StreamWriter(stream)
+        {
+            AutoFlush = false,
+        };
+    }
+
+    private static bool IsTruthyEnvironmentVariable(string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void TryWriteUInt16(Span<byte> buffer, int offset, ushort value)
@@ -1452,7 +1505,7 @@ internal static unsafe class VirtualCameraState
             TryWriteUInt32(imageInfoSpan, ImageInfoOffsetFocusing, 0);
             TryWriteUInt32(imageInfoSpan, ImageInfoOffsetReserved4, 0);
 
-            if (_imageInfoTraceCount < 16)
+            if (_imageInfoTraceCount < 64)
             {
                 _imageInfoTraceCount++;
                 Log($"GetImageInfo(memoryId={memoryId}, size={imageInfoSize}) -> {mem.Width}x{mem.Height}, frame={frameNumber}, tsUs={snapshot.DeviceTimestampUs}, io=0x{snapshot.IoStatus:X8}, flags=0x{snapshot.Flags:X8}");
@@ -1839,7 +1892,11 @@ internal static unsafe class VirtualCameraState
                     : 0.0;
             }
 
-            Log($"GetFrameTimeRange(min={1.0 / maxFps:F6}s, max={1.0 / minFps:F6}s, fpsRange={minFps:F3}..{maxFps:F3}, current={currentFps:F3})");
+            if (_displayTraceCount < 64)
+            {
+                _displayTraceCount++;
+                Log($"GetFrameTimeRange(min={1.0 / maxFps:F6}s, max={1.0 / minFps:F6}s, fpsRange={minFps:F3}..{maxFps:F3}, current={currentFps:F3})");
+            }
         }
 
         return SetLastError(UeyeNative.IS_SUCCESS, "OK");

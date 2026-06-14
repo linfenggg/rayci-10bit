@@ -1963,6 +1963,11 @@ internal static unsafe class DiagnosticApiHook
 
     private static bool ShouldLog(ref int counter, int limit)
     {
+        if (!VirtualCameraState.IsVerboseDebugLoggingEnabled())
+        {
+            return false;
+        }
+
         var next = Interlocked.Increment(ref counter);
         return next <= limit;
     }

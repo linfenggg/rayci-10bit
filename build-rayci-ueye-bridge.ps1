@@ -35,7 +35,22 @@ function Reset-Directory {
             throw "Refusing to delete path outside workspace: $TargetPath"
         }
 
-        Remove-Item -LiteralPath $TargetPath -Recurse -Force
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                Remove-Item -LiteralPath $TargetPath -Recurse -Force -ErrorAction Stop
+                break
+            } catch {
+                if (-not (Test-Path -LiteralPath $TargetPath)) {
+                    break
+                }
+
+                if ($attempt -eq 3) {
+                    throw
+                }
+
+                Start-Sleep -Milliseconds (200 * $attempt)
+            }
+        }
     }
 
     New-Item -ItemType Directory -Path $TargetPath -Force | Out-Null
@@ -45,12 +60,15 @@ $repoRoot = Get-FullPath -PathValue $PSScriptRoot
 $artifactsRootFull = Get-FullPath -PathValue $ArtifactsRoot
 $proxyProject = Join-Path $repoRoot 'virtual_ueye_proxy\VirtualUEyeProxy.csproj'
 $helperProject = Join-Path $repoRoot 'daheng_frame_server\DahengFrameServer.csproj'
+$launcherProject = Join-Path $repoRoot 'rayci_portable_launcher\RayCiPortableLauncher.csproj'
 $proxyOutput = Join-Path $artifactsRootFull 'ueye_proxy'
 $helperOutput = Join-Path $artifactsRootFull 'DahengBridgeHelper'
+$launcherOutput = Join-Path $artifactsRootFull 'RayCiPortableLauncher'
 
 New-Item -ItemType Directory -Path $artifactsRootFull -Force | Out-Null
 Reset-Directory -TargetPath $proxyOutput -SafeRoot $repoRoot
 Reset-Directory -TargetPath $helperOutput -SafeRoot $repoRoot
+Reset-Directory -TargetPath $launcherOutput -SafeRoot $repoRoot
 
 Write-Host "Publishing virtual uEye proxy..."
 dotnet publish $proxyProject `
@@ -64,8 +82,16 @@ dotnet publish $helperProject `
     --self-contained true `
     -o $helperOutput
 
+Write-Host "Publishing RayCi portable launcher..."
+dotnet publish $launcherProject `
+    -c $Configuration `
+    -r win-x64 `
+    --self-contained true `
+    -o $launcherOutput
+
 $proxyDll = Join-Path $proxyOutput 'ueye_api_64.dll'
 $helperExe = Join-Path $helperOutput 'DahengFrameServer.exe'
+$launcherExe = Join-Path $launcherOutput 'RayCi.exe'
 
 if (-not (Test-Path -LiteralPath $proxyDll)) {
     throw "Virtual uEye proxy was not produced: $proxyDll"
@@ -75,7 +101,12 @@ if (-not (Test-Path -LiteralPath $helperExe)) {
     throw "Daheng helper was not produced: $helperExe"
 }
 
+if (-not (Test-Path -LiteralPath $launcherExe)) {
+    throw "RayCi portable launcher was not produced: $launcherExe"
+}
+
 Write-Host ""
 Write-Host "Bridge artifacts ready:"
 Write-Host "  Proxy : $proxyDll"
 Write-Host "  Helper: $helperExe"
+Write-Host "  Launch: $launcherExe"

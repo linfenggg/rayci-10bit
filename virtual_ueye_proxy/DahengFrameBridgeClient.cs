@@ -23,11 +23,14 @@ internal static unsafe class DahengFrameBridgeClient
     private static DateTime _lastHelperStartAttemptUtc = DateTime.MinValue;
     private static DateTime _lastFrameProbeUtc = DateTime.MinValue;
     private static DateTime _lastFrameRefreshUtc = DateTime.MinValue;
+    private static DateTime _lastControlStateRefreshUtc = DateTime.MinValue;
     private static long _cachedFrameId;
     private static int _cachedFrameWidth;
     private static int _cachedFrameHeight;
     private static int _cachedFramePayloadLength;
     private static bool _hasLoggedStreaming;
+    private static bool _hasCachedControlState;
+    private static BridgeControlState _cachedControlState;
 
     static DahengFrameBridgeClient()
     {
@@ -83,7 +86,21 @@ internal static unsafe class DahengFrameBridgeClient
                 return false;
             }
 
-            return TryReadControlStateLocked(out state);
+            var nowUtc = DateTime.UtcNow;
+            if (_hasCachedControlState &&
+                nowUtc - _lastControlStateRefreshUtc <= TimeSpan.FromMilliseconds(8))
+            {
+                state = _cachedControlState;
+                return true;
+            }
+
+            if (!TryReadControlStateLocked(out state))
+            {
+                return false;
+            }
+
+            CacheControlStateLocked(state, nowUtc);
+            return true;
         }
     }
 
@@ -234,6 +251,7 @@ internal static unsafe class DahengFrameBridgeClient
 
             if (appliedSequence >= sequence && TryReadControlStateLocked(out state))
             {
+                CacheControlStateLocked(state, DateTime.UtcNow);
                 return true;
             }
 
@@ -248,7 +266,13 @@ internal static unsafe class DahengFrameBridgeClient
             }
         }
 
-        return TryReadControlStateLocked(out state);
+        var success = TryReadControlStateLocked(out state);
+        if (success)
+        {
+            CacheControlStateLocked(state, DateTime.UtcNow);
+        }
+
+        return success;
     }
 
     private static bool TryReadControlStateLocked(out BridgeControlState state)
@@ -297,6 +321,13 @@ internal static unsafe class DahengFrameBridgeClient
             BinningY: Math.Max(1, _accessor.ReadInt32(FrameBridgeProtocol.AppliedBinningYOffset)),
             BlackLevel: _accessor.ReadInt32(FrameBridgeProtocol.AppliedBlackLevelOffset));
         return true;
+    }
+
+    private static void CacheControlStateLocked(BridgeControlState state, DateTime nowUtc)
+    {
+        _cachedControlState = state;
+        _hasCachedControlState = true;
+        _lastControlStateRefreshUtc = nowUtc;
     }
 
     private static bool ShouldProbeBridgeFrameLocked(DateTime nowUtc)
@@ -925,7 +956,10 @@ internal static unsafe class DahengFrameBridgeClient
         _cachedFramePayloadLength = 0;
         _lastFrameProbeUtc = DateTime.MinValue;
         _lastFrameRefreshUtc = DateTime.MinValue;
+        _lastControlStateRefreshUtc = DateTime.MinValue;
         _hasLoggedStreaming = false;
+        _hasCachedControlState = false;
+        _cachedControlState = default;
     }
 
     private static double ToGainDb(int masterGain, double minGainDb, double maxGainDb)

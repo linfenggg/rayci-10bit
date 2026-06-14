@@ -60,7 +60,7 @@ internal static unsafe class XmlRpcHook
                 (nint)(delegate* unmanaged<nint, int, int, byte>)&BindAndListenHook,
                 ref _originalBindAndListen);
 
-            VirtualCameraState.Log($"XmlRpcHook: patched {patched} XmlRpc imports.");
+            VirtualCameraState.DebugLog($"XmlRpcHook: patched {patched} XmlRpc imports.");
         }
         catch (Exception ex)
         {
@@ -72,30 +72,30 @@ internal static unsafe class XmlRpcHook
     private static byte ExecuteHook(nint thisPtr, byte* methodName, nint inputValue, nint resultValue, double timeoutSeconds)
     {
         var method = PtrToStringAnsi(methodName) ?? string.Empty;
-        VirtualCameraState.Log($"XmlRpcHook: execute(method={method}, timeout={timeoutSeconds:0.###})");
+        VirtualCameraState.DebugLog($"XmlRpcHook: execute(method={method}, timeout={timeoutSeconds:0.###})");
 
         if (ShouldForceLicense(method) && TryAssignBoolResult(resultValue, true))
         {
-            VirtualCameraState.Log($"XmlRpcHook: forced XmlRpc license success for {method}");
+            VirtualCameraState.DebugLog($"XmlRpcHook: forced XmlRpc license success for {method}");
             return 1;
         }
 
         if (_originalExecute == nint.Zero)
         {
-            VirtualCameraState.Log($"XmlRpcHook: original execute missing for {method}");
+            VirtualCameraState.DebugLog($"XmlRpcHook: original execute missing for {method}");
             return 0;
         }
 
         var original = (delegate* unmanaged<nint, byte*, nint, nint, double, byte>)_originalExecute;
         var result = original(thisPtr, methodName, inputValue, resultValue, timeoutSeconds);
-        VirtualCameraState.Log($"XmlRpcHook: execute(method={method}) -> {result}");
+        VirtualCameraState.DebugLog($"XmlRpcHook: execute(method={method}) -> {result}");
         return result;
     }
 
     [UnmanagedCallersOnly(EntryPoint = "Ultron_XmlRpcServerBindAndListen_Hook")]
     private static byte BindAndListenHook(nint thisPtr, int port, int backlog)
     {
-        VirtualCameraState.Log($"XmlRpcHook: bindAndListen(port={port}, backlog={backlog})");
+        VirtualCameraState.DebugLog($"XmlRpcHook: bindAndListen(port={port}, backlog={backlog})");
         if (_originalBindAndListen == nint.Zero)
         {
             return 0;
@@ -103,7 +103,7 @@ internal static unsafe class XmlRpcHook
 
         var original = (delegate* unmanaged<nint, int, int, byte>)_originalBindAndListen;
         var result = original(thisPtr, port, backlog);
-        VirtualCameraState.Log($"XmlRpcHook: bindAndListen(port={port}) -> {result}");
+        VirtualCameraState.DebugLog($"XmlRpcHook: bindAndListen(port={port}) -> {result}");
         return result;
     }
 
@@ -145,7 +145,7 @@ internal static unsafe class XmlRpcHook
         if (_assignBoolExport == nint.Zero)
         {
             var error = new Win32Exception(Marshal.GetLastWin32Error());
-            VirtualCameraState.Log($"XmlRpcHook: resolve assign(bool) failed: {error.Message}");
+            VirtualCameraState.DebugLog($"XmlRpcHook: resolve assign(bool) failed: {error.Message}");
         }
 
         return _assignBoolExport;
@@ -226,14 +226,14 @@ internal static unsafe class XmlRpcHook
                 if (!VirtualProtect((nint)iat, (nuint)sizeof(nint), PageReadWrite, out var oldProtect))
                 {
                     var error = new Win32Exception(Marshal.GetLastWin32Error());
-                    VirtualCameraState.Log($"XmlRpcHook: VirtualProtect failed for {targetImport}: {error.Message}");
+                    VirtualCameraState.DebugLog($"XmlRpcHook: VirtualProtect failed for {targetImport}: {error.Message}");
                     return 0;
                 }
 
                 original = *iat;
                 *iat = replacement;
                 _ = VirtualProtect((nint)iat, (nuint)sizeof(nint), oldProtect, out _);
-                VirtualCameraState.Log($"XmlRpcHook: patched {targetDll}!{targetImport}");
+                VirtualCameraState.DebugLog($"XmlRpcHook: patched {targetDll}!{targetImport}");
                 return 1;
             }
         }
