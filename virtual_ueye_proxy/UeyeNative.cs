@@ -18,6 +18,7 @@ internal static class UeyeNative
     public const int IS_CM_MONO16 = 28;
     public const int IS_CM_SENSOR_RAW10 = 33;
     public const int IS_CM_MONO10 = 34;
+    public const int IS_CM_MONO10_COMPAT_Y16 = 0x4022;
     public const int IS_CM_MODE_MASK = 0x007F;
     public const int IS_GET_COLOR_MODE = unchecked((int)0x8000);
     public const int IS_GET_BITS_PER_PIXEL = unchecked((int)0x9000);
@@ -56,6 +57,84 @@ internal static class UeyeNative
     public const uint IS_AOI_IMAGE_GET_SIZE_INC = 0x0012;
     public const uint IS_AOI_IMAGE_GET_ORIGINAL_AOI = 0x0015;
 
+    public const int IS_GET_SUBSAMPLING = unchecked((int)0x8000);
+    public const int IS_GET_SUPPORTED_SUBSAMPLING = unchecked((int)0x8001);
+    public const int IS_GET_SUBSAMPLING_TYPE = unchecked((int)0x8002);
+    public const int IS_GET_SUBSAMPLING_FACTOR_HORIZONTAL = unchecked((int)0x8004);
+    public const int IS_GET_SUBSAMPLING_FACTOR_VERTICAL = unchecked((int)0x8008);
+
+    public const int IS_SUBSAMPLING_DISABLE = 0x0000;
+    public const int IS_SUBSAMPLING_2X_VERTICAL = 0x0001;
+    public const int IS_SUBSAMPLING_2X_HORIZONTAL = 0x0002;
+    public const int IS_SUBSAMPLING_4X_VERTICAL = 0x0004;
+    public const int IS_SUBSAMPLING_4X_HORIZONTAL = 0x0008;
+    public const int IS_SUBSAMPLING_3X_VERTICAL = 0x0010;
+    public const int IS_SUBSAMPLING_3X_HORIZONTAL = 0x0020;
+    public const int IS_SUBSAMPLING_5X_VERTICAL = 0x0040;
+    public const int IS_SUBSAMPLING_5X_HORIZONTAL = 0x0080;
+    public const int IS_SUBSAMPLING_6X_VERTICAL = 0x0100;
+    public const int IS_SUBSAMPLING_6X_HORIZONTAL = 0x0200;
+    public const int IS_SUBSAMPLING_8X_VERTICAL = 0x0400;
+    public const int IS_SUBSAMPLING_8X_HORIZONTAL = 0x0800;
+    public const int IS_SUBSAMPLING_16X_VERTICAL = 0x1000;
+    public const int IS_SUBSAMPLING_16X_HORIZONTAL = 0x2000;
+    public const int IS_SUBSAMPLING_MONO = 0x02;
+    public const int IS_SUBSAMPLING_MASK_VERTICAL =
+        IS_SUBSAMPLING_2X_VERTICAL |
+        IS_SUBSAMPLING_3X_VERTICAL |
+        IS_SUBSAMPLING_4X_VERTICAL |
+        IS_SUBSAMPLING_5X_VERTICAL |
+        IS_SUBSAMPLING_6X_VERTICAL |
+        IS_SUBSAMPLING_8X_VERTICAL |
+        IS_SUBSAMPLING_16X_VERTICAL;
+    public const int IS_SUBSAMPLING_MASK_HORIZONTAL =
+        IS_SUBSAMPLING_2X_HORIZONTAL |
+        IS_SUBSAMPLING_3X_HORIZONTAL |
+        IS_SUBSAMPLING_4X_HORIZONTAL |
+        IS_SUBSAMPLING_5X_HORIZONTAL |
+        IS_SUBSAMPLING_6X_HORIZONTAL |
+        IS_SUBSAMPLING_8X_HORIZONTAL |
+        IS_SUBSAMPLING_16X_HORIZONTAL;
+
+    public const int IS_GET_BINNING = unchecked((int)0x8000);
+    public const int IS_GET_SUPPORTED_BINNING = unchecked((int)0x8001);
+    public const int IS_GET_BINNING_TYPE = unchecked((int)0x8002);
+    public const int IS_GET_BINNING_FACTOR_HORIZONTAL = unchecked((int)0x8004);
+    public const int IS_GET_BINNING_FACTOR_VERTICAL = unchecked((int)0x8008);
+
+    public const int IS_BINNING_DISABLE = 0x0000;
+    public const int IS_BINNING_2X_VERTICAL = 0x0001;
+    public const int IS_BINNING_2X_HORIZONTAL = 0x0002;
+    public const int IS_BINNING_4X_VERTICAL = 0x0004;
+    public const int IS_BINNING_4X_HORIZONTAL = 0x0008;
+    public const int IS_BINNING_3X_VERTICAL = 0x0010;
+    public const int IS_BINNING_3X_HORIZONTAL = 0x0020;
+    public const int IS_BINNING_5X_VERTICAL = 0x0040;
+    public const int IS_BINNING_5X_HORIZONTAL = 0x0080;
+    public const int IS_BINNING_6X_VERTICAL = 0x0100;
+    public const int IS_BINNING_6X_HORIZONTAL = 0x0200;
+    public const int IS_BINNING_8X_VERTICAL = 0x0400;
+    public const int IS_BINNING_8X_HORIZONTAL = 0x0800;
+    public const int IS_BINNING_16X_VERTICAL = 0x1000;
+    public const int IS_BINNING_16X_HORIZONTAL = 0x2000;
+    public const int IS_BINNING_MONO = 0x02;
+    public const int IS_BINNING_MASK_VERTICAL =
+        IS_BINNING_2X_VERTICAL |
+        IS_BINNING_3X_VERTICAL |
+        IS_BINNING_4X_VERTICAL |
+        IS_BINNING_5X_VERTICAL |
+        IS_BINNING_6X_VERTICAL |
+        IS_BINNING_8X_VERTICAL |
+        IS_BINNING_16X_VERTICAL;
+    public const int IS_BINNING_MASK_HORIZONTAL =
+        IS_BINNING_2X_HORIZONTAL |
+        IS_BINNING_3X_HORIZONTAL |
+        IS_BINNING_4X_HORIZONTAL |
+        IS_BINNING_5X_HORIZONTAL |
+        IS_BINNING_6X_HORIZONTAL |
+        IS_BINNING_8X_HORIZONTAL |
+        IS_BINNING_16X_HORIZONTAL;
+
     public const uint IS_EXPOSURE_CMD_GET_CAPS = 1;
     public const uint IS_EXPOSURE_CMD_GET_EXPOSURE_DEFAULT = 2;
     public const uint IS_EXPOSURE_CMD_GET_EXPOSURE_RANGE_MIN = 3;
@@ -71,6 +150,20 @@ internal static class UeyeNative
 
     public const uint IS_EXPOSURE_CAP_EXPOSURE = 0x00000001;
     public const uint IS_EXPOSURE_CAP_FINE_INCREMENT = 0x00000002;
+
+    public const uint IS_BLACKLEVEL_CMD_GET_CAPS = 1;
+    public const uint IS_BLACKLEVEL_CMD_GET_MODE_DEFAULT = 2;
+    public const uint IS_BLACKLEVEL_CMD_GET_MODE = 3;
+    public const uint IS_BLACKLEVEL_CMD_SET_MODE = 4;
+    public const uint IS_BLACKLEVEL_CMD_GET_OFFSET_DEFAULT = 5;
+    public const uint IS_BLACKLEVEL_CMD_GET_OFFSET_RANGE = 6;
+    public const uint IS_BLACKLEVEL_CMD_GET_OFFSET = 7;
+    public const uint IS_BLACKLEVEL_CMD_SET_OFFSET = 8;
+
+    public const int IS_AUTO_BLACKLEVEL_OFF = 0;
+    public const int IS_AUTO_BLACKLEVEL_ON = 1;
+    public const uint IS_BLACKLEVEL_CAP_SET_AUTO_BLACKLEVEL = 0x00000001;
+    public const uint IS_BLACKLEVEL_CAP_SET_OFFSET = 0x00000002;
 
     public const int IS_SET_ENABLE_AUTO_GAIN = 0x8800;
     public const int IS_SET_ENABLE_AUTO_SHUTTER = 0x8802;
@@ -136,7 +229,7 @@ internal static class UeyeNative
     public const int DefaultBitsPerPixel = 16;
     public const int DefaultSignalBitsPerPixel = 10;
     public const int DefaultPitch = DefaultWidth * ((DefaultBitsPerPixel + 7) / 8);
-    public const int DefaultColorMode = IS_CM_MONO16;
+    public const int DefaultColorMode = IS_CM_MONO10_COMPAT_Y16;
     public const double MinExposureMs = 0.1;
     public const double MaxExposureMs = 1000.0;
     public const double ExposureIncrementMs = 0.1;

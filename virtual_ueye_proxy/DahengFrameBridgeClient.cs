@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.MemoryMappedFiles;
+using System.Runtime.InteropServices;
 using RayCiBridge;
 
 namespace VirtualUEyeProxy;
@@ -16,6 +17,9 @@ internal static unsafe class DahengFrameBridgeClient
     private static MemoryMappedFile? _map;
     private static MemoryMappedViewAccessor? _accessor;
     private static Mutex? _mutex;
+    private static Process? _helperProcess;
+    private static string? _helperProcessPath;
+    private static nint _helperJobHandle;
     private static DateTime _lastHelperStartAttemptUtc = DateTime.MinValue;
     private static DateTime _lastFrameProbeUtc = DateTime.MinValue;
     private static DateTime _lastFrameRefreshUtc = DateTime.MinValue;
@@ -24,6 +28,12 @@ internal static unsafe class DahengFrameBridgeClient
     private static int _cachedFrameHeight;
     private static int _cachedFramePayloadLength;
     private static bool _hasLoggedStreaming;
+
+    static DahengFrameBridgeClient()
+    {
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => CleanupHelperLifetime("ProcessExit");
+        AppDomain.CurrentDomain.DomainUnload += (_, _) => CleanupHelperLifetime("DomainUnload");
+    }
 
     public static bool TryCopyLatestFrame(ImageMemory memory, out long bridgeFrameId)
     {
@@ -116,6 +126,24 @@ internal static unsafe class DahengFrameBridgeClient
             request => request with { FrameRateHz = Math.Max(0.0, frameRateHz) },
             out state);
 
+    public static bool TrySetGeometry(int width, int height, int offsetX, int offsetY, int binningX, int binningY, out BridgeControlState state)
+        => TryUpdateControlRequest(
+            request => request with
+            {
+                Width = Math.Max(0, width),
+                Height = Math.Max(0, height),
+                OffsetX = Math.Max(0, offsetX),
+                OffsetY = Math.Max(0, offsetY),
+                BinningX = Math.Max(1, binningX),
+                BinningY = Math.Max(1, binningY)
+            },
+            out state);
+
+    public static bool TrySetBlackLevel(int blackLevel, out BridgeControlState state)
+        => TryUpdateControlRequest(
+            request => request with { BlackLevel = Math.Clamp(blackLevel, 0, 255) },
+            out state);
+
     private static bool TryUpdateControlRequest(Func<ControlRequest, ControlRequest> updater, out BridgeControlState state)
     {
         lock (Gate)
@@ -144,6 +172,14 @@ internal static unsafe class DahengFrameBridgeClient
                 _accessor.Write(FrameBridgeProtocol.RequestedGainDbOffset, nextRequest.GainDb);
                 _accessor.Write(FrameBridgeProtocol.RequestedFrameRateHzOffset, nextRequest.FrameRateHz);
                 _accessor.Write(FrameBridgeProtocol.RequestedMasterGainOffset, nextRequest.MasterGain);
+                _accessor.Write(FrameBridgeProtocol.RequestedCapturePixelFormatOffset, nextRequest.CapturePixelFormat);
+                _accessor.Write(FrameBridgeProtocol.RequestedWidthOffset, nextRequest.Width);
+                _accessor.Write(FrameBridgeProtocol.RequestedHeightOffset, nextRequest.Height);
+                _accessor.Write(FrameBridgeProtocol.RequestedOffsetXOffset, nextRequest.OffsetX);
+                _accessor.Write(FrameBridgeProtocol.RequestedOffsetYOffset, nextRequest.OffsetY);
+                _accessor.Write(FrameBridgeProtocol.RequestedBinningXOffset, nextRequest.BinningX);
+                _accessor.Write(FrameBridgeProtocol.RequestedBinningYOffset, nextRequest.BinningY);
+                _accessor.Write(FrameBridgeProtocol.RequestedBlackLevelOffset, nextRequest.BlackLevel);
                 _accessor.Write(FrameBridgeProtocol.RequestSequenceOffset, nextSequence);
                 _accessor.Flush();
 
@@ -166,7 +202,16 @@ internal static unsafe class DahengFrameBridgeClient
                     AppliedSequence: _accessor.ReadInt32(FrameBridgeProtocol.AppliedSequenceOffset),
                     RequestSequence: nextSequence,
                     GainBoostSupported: _accessor.ReadInt32(FrameBridgeProtocol.GainBoostSupportedOffset) != 0,
-                    GainBoostEnabled: _accessor.ReadInt32(FrameBridgeProtocol.GainBoostEnabledOffset) != 0);
+                    GainBoostEnabled: _accessor.ReadInt32(FrameBridgeProtocol.GainBoostEnabledOffset) != 0,
+                    PixelFormatCapabilityFlags: _accessor.ReadInt32(FrameBridgeProtocol.PixelFormatCapabilityFlagsOffset),
+                    CapturePixelFormat: nextRequest.CapturePixelFormat,
+                    Width: nextRequest.Width,
+                    Height: nextRequest.Height,
+                    OffsetX: nextRequest.OffsetX,
+                    OffsetY: nextRequest.OffsetY,
+                    BinningX: nextRequest.BinningX,
+                    BinningY: nextRequest.BinningY,
+                    BlackLevel: nextRequest.BlackLevel);
             }
 
             return TryWaitForAppliedSequenceLocked(nextSequence, out state);
@@ -241,7 +286,16 @@ internal static unsafe class DahengFrameBridgeClient
             AppliedSequence: _accessor.ReadInt32(FrameBridgeProtocol.AppliedSequenceOffset),
             RequestSequence: _accessor.ReadInt32(FrameBridgeProtocol.RequestSequenceOffset),
             GainBoostSupported: _accessor.ReadInt32(FrameBridgeProtocol.GainBoostSupportedOffset) != 0,
-            GainBoostEnabled: _accessor.ReadInt32(FrameBridgeProtocol.GainBoostEnabledOffset) != 0);
+            GainBoostEnabled: _accessor.ReadInt32(FrameBridgeProtocol.GainBoostEnabledOffset) != 0,
+            PixelFormatCapabilityFlags: _accessor.ReadInt32(FrameBridgeProtocol.PixelFormatCapabilityFlagsOffset),
+            CapturePixelFormat: _accessor.ReadInt32(FrameBridgeProtocol.AppliedCapturePixelFormatOffset),
+            Width: _accessor.ReadInt32(FrameBridgeProtocol.AppliedWidthOffset),
+            Height: _accessor.ReadInt32(FrameBridgeProtocol.AppliedHeightOffset),
+            OffsetX: _accessor.ReadInt32(FrameBridgeProtocol.AppliedOffsetXOffset),
+            OffsetY: _accessor.ReadInt32(FrameBridgeProtocol.AppliedOffsetYOffset),
+            BinningX: Math.Max(1, _accessor.ReadInt32(FrameBridgeProtocol.AppliedBinningXOffset)),
+            BinningY: Math.Max(1, _accessor.ReadInt32(FrameBridgeProtocol.AppliedBinningYOffset)),
+            BlackLevel: _accessor.ReadInt32(FrameBridgeProtocol.AppliedBlackLevelOffset));
         return true;
     }
 
@@ -309,7 +363,15 @@ internal static unsafe class DahengFrameBridgeClient
             ExposureMaxUs: _accessor.ReadDouble(FrameBridgeProtocol.ExposureMaxUsOffset),
             ExposureIncUs: _accessor.ReadDouble(FrameBridgeProtocol.ExposureIncUsOffset),
             FrameRateHz: _accessor.ReadDouble(FrameBridgeProtocol.RequestedFrameRateHzOffset),
-            MasterGain: _accessor.ReadInt32(FrameBridgeProtocol.RequestedMasterGainOffset));
+            MasterGain: _accessor.ReadInt32(FrameBridgeProtocol.RequestedMasterGainOffset),
+            CapturePixelFormat: _accessor.ReadInt32(FrameBridgeProtocol.RequestedCapturePixelFormatOffset),
+            Width: _accessor.ReadInt32(FrameBridgeProtocol.RequestedWidthOffset),
+            Height: _accessor.ReadInt32(FrameBridgeProtocol.RequestedHeightOffset),
+            OffsetX: _accessor.ReadInt32(FrameBridgeProtocol.RequestedOffsetXOffset),
+            OffsetY: _accessor.ReadInt32(FrameBridgeProtocol.RequestedOffsetYOffset),
+            BinningX: Math.Max(1, _accessor.ReadInt32(FrameBridgeProtocol.RequestedBinningXOffset)),
+            BinningY: Math.Max(1, _accessor.ReadInt32(FrameBridgeProtocol.RequestedBinningYOffset)),
+            BlackLevel: _accessor.ReadInt32(FrameBridgeProtocol.RequestedBlackLevelOffset));
     }
 
     private static bool TryReadFrameHeaderLocked(out FrameHeader frameHeader)
@@ -355,10 +417,35 @@ internal static unsafe class DahengFrameBridgeClient
     {
         fixed (byte* sourceBytes = sourceFrame)
         {
+            var sourceStrideBytes = sourceWidth * sizeof(ushort);
             var source16 = (ushort*)sourceBytes;
 
             if (UsesWideMonochromeContainer(memory.BitsPerPixel))
             {
+                if (memory.Width == sourceWidth && memory.Height == sourceHeight)
+                {
+                    if (memory.Pitch == sourceStrideBytes)
+                    {
+                        Buffer.MemoryCopy(
+                            sourceBytes,
+                            (void*)memory.Pointer,
+                            memory.SizeBytes,
+                            sourceHeight * sourceStrideBytes);
+                        return;
+                    }
+
+                    for (var y = 0; y < sourceHeight; y++)
+                    {
+                        Buffer.MemoryCopy(
+                            sourceBytes + (y * sourceStrideBytes),
+                            (void*)((byte*)memory.Pointer + (y * memory.Pitch)),
+                            memory.Pitch,
+                            sourceStrideBytes);
+                    }
+
+                    return;
+                }
+
                 for (var y = 0; y < memory.Height; y++)
                 {
                     var sourceY = y * sourceHeight / memory.Height;
@@ -408,6 +495,11 @@ internal static unsafe class DahengFrameBridgeClient
 
     private static bool EnsureHelperStartedLocked()
     {
+        if (IsTrackedHelperRunningLocked())
+        {
+            return true;
+        }
+
         if (DateTime.UtcNow - _lastHelperStartAttemptUtc < TimeSpan.FromSeconds(5))
         {
             return false;
@@ -421,9 +513,14 @@ internal static unsafe class DahengFrameBridgeClient
                 continue;
             }
 
+            if (TryAttachExistingHelperProcessLocked(candidate))
+            {
+                return true;
+            }
+
             try
             {
-                Process.Start(new ProcessStartInfo
+                var process = Process.Start(new ProcessStartInfo
                 {
                     FileName = candidate,
                     WorkingDirectory = Path.GetDirectoryName(candidate) ?? AppContext.BaseDirectory,
@@ -431,17 +528,285 @@ internal static unsafe class DahengFrameBridgeClient
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden,
                 });
-                VirtualCameraState.Log($"Started Daheng frame helper: {candidate}");
+                if (process is null)
+                {
+                    VirtualCameraState.Log($"Process.Start returned null for Daheng helper: {candidate}");
+                    continue;
+                }
+
+                ReplaceTrackedHelperProcessLocked(process, candidate);
+                var boundToJob = TryBindTrackedHelperToJobLocked(process);
+                VirtualCameraState.Log($"Started Daheng frame helper: {candidate}, pid={SafeGetProcessId(process)}, jobBound={boundToJob}");
                 return true;
             }
             catch (Exception ex)
             {
                 VirtualCameraState.Log($"Failed to start Daheng helper '{candidate}': {ex.Message}");
+
+                if (TryAttachExistingHelperProcessLocked(candidate))
+                {
+                    return true;
+                }
             }
         }
 
         VirtualCameraState.Log("No Daheng frame helper candidate could be started.");
         return true;
+    }
+
+    private static bool IsTrackedHelperRunningLocked()
+    {
+        if (_helperProcess is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (_helperProcess.HasExited)
+            {
+                VirtualCameraState.Log(
+                    $"Tracked Daheng helper exited: pid={SafeGetProcessId(_helperProcess)}, " +
+                    $"path={_helperProcessPath ?? "<unknown>"}");
+                ClearTrackedHelperProcessLocked();
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            VirtualCameraState.Log($"Failed to inspect tracked Daheng helper: {ex.GetType().Name}: {ex.Message}");
+            ClearTrackedHelperProcessLocked();
+            return false;
+        }
+    }
+
+    private static void ReplaceTrackedHelperProcessLocked(Process process, string candidate)
+    {
+        if (!ReferenceEquals(_helperProcess, process))
+        {
+            TryDisposeTrackedHelperProcessLocked();
+        }
+
+        _helperProcess = process;
+        _helperProcessPath = candidate;
+    }
+
+    private static void ClearTrackedHelperProcessLocked()
+    {
+        TryDisposeTrackedHelperProcessLocked();
+        _helperProcess = null;
+        _helperProcessPath = null;
+    }
+
+    private static void TryDisposeTrackedHelperProcessLocked()
+    {
+        if (_helperProcess is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _helperProcess.Dispose();
+        }
+        catch
+        {
+            // Best-effort process cleanup only.
+        }
+    }
+
+    private static bool TryAttachExistingHelperProcessLocked(string candidate)
+    {
+        try
+        {
+            var normalizedCandidate = Path.GetFullPath(candidate);
+            foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(FrameBridgeProtocol.HelperExeName)))
+            {
+                try
+                {
+                    if (process.HasExited)
+                    {
+                        process.Dispose();
+                        continue;
+                    }
+
+                    var processPath = process.MainModule?.FileName;
+                    if (!string.Equals(processPath, normalizedCandidate, StringComparison.OrdinalIgnoreCase))
+                    {
+                        process.Dispose();
+                        continue;
+                    }
+
+                    ReplaceTrackedHelperProcessLocked(process, normalizedCandidate);
+                    var boundToJob = TryBindTrackedHelperToJobLocked(process);
+                    VirtualCameraState.Log(
+                        $"Attached to existing Daheng frame helper: {normalizedCandidate}, " +
+                        $"pid={SafeGetProcessId(process)}, jobBound={boundToJob}");
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        process.Dispose();
+                    }
+                    catch
+                    {
+                        // Best-effort cleanup only.
+                    }
+
+                    VirtualCameraState.Log(
+                        $"Failed to inspect existing Daheng helper candidate '{candidate}': " +
+                        $"{ex.GetType().Name}: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            VirtualCameraState.Log(
+                $"Failed while attaching existing Daheng helper '{candidate}': " +
+                $"{ex.GetType().Name}: {ex.Message}");
+        }
+
+        return false;
+    }
+
+    private static void TryStopTrackedHelperProcessLocked(string reason)
+    {
+        if (_helperProcess is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!_helperProcess.HasExited)
+            {
+                VirtualCameraState.Log(
+                    $"Stopping tracked Daheng helper: pid={SafeGetProcessId(_helperProcess)}, " +
+                    $"path={_helperProcessPath ?? "<unknown>"}, reason={reason}");
+                _helperProcess.Kill(entireProcessTree: true);
+                _helperProcess.WaitForExit(2000);
+            }
+        }
+        catch (Exception ex)
+        {
+            VirtualCameraState.Log(
+                $"Failed to stop tracked Daheng helper pid={SafeGetProcessId(_helperProcess)} " +
+                $"reason={reason}: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            ClearTrackedHelperProcessLocked();
+        }
+    }
+
+    private static void CleanupHelperLifetime(string reason)
+    {
+        lock (Gate)
+        {
+            TryStopTrackedHelperProcessLocked(reason);
+            ResetBridgeHandlesLocked($"helper lifetime cleanup ({reason})");
+
+            if (_helperJobHandle != 0)
+            {
+                try
+                {
+                    CloseHandle(_helperJobHandle);
+                }
+                catch
+                {
+                    // Best-effort handle cleanup only.
+                }
+
+                _helperJobHandle = 0;
+            }
+        }
+    }
+
+    private static bool TryBindTrackedHelperToJobLocked(Process process)
+    {
+        if (process.HasExited)
+        {
+            return false;
+        }
+
+        if (!EnsureHelperJobObjectLocked())
+        {
+            return false;
+        }
+
+        try
+        {
+            if (AssignProcessToJobObject(_helperJobHandle, process.Handle))
+            {
+                return true;
+            }
+
+            var lastError = Marshal.GetLastWin32Error();
+            VirtualCameraState.Log(
+                $"AssignProcessToJobObject failed for Daheng helper pid={SafeGetProcessId(process)} " +
+                $"path={_helperProcessPath ?? "<unknown>"} win32={lastError}");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            VirtualCameraState.Log($"Job binding failed for Daheng helper pid={SafeGetProcessId(process)}: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool EnsureHelperJobObjectLocked()
+    {
+        if (_helperJobHandle != 0)
+        {
+            return true;
+        }
+
+        var jobHandle = CreateJobObjectW(nint.Zero, null);
+        if (jobHandle == 0)
+        {
+            VirtualCameraState.Log($"CreateJobObjectW failed for Daheng helper lifecycle binding, win32={Marshal.GetLastWin32Error()}");
+            return false;
+        }
+
+        var limits = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        {
+            BasicLimitInformation = new JOBOBJECT_BASIC_LIMIT_INFORMATION
+            {
+                LimitFlags = JobObjectLimitFlags.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            },
+        };
+
+        if (!SetInformationJobObject(
+                jobHandle,
+                JOBOBJECTINFOCLASS.JobObjectExtendedLimitInformation,
+                ref limits,
+                (uint)Marshal.SizeOf<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()))
+        {
+            var lastError = Marshal.GetLastWin32Error();
+            CloseHandle(jobHandle);
+            VirtualCameraState.Log($"SetInformationJobObject failed for Daheng helper lifecycle binding, win32={lastError}");
+            return false;
+        }
+
+        _helperJobHandle = jobHandle;
+        VirtualCameraState.Log("Created Daheng helper lifecycle job object.");
+        return true;
+    }
+
+    private static int SafeGetProcessId(Process process)
+    {
+        try
+        {
+            return process.Id;
+        }
+        catch
+        {
+            return -1;
+        }
     }
 
     private static IEnumerable<string> EnumerateHelperCandidates()
@@ -465,17 +830,6 @@ internal static unsafe class DahengFrameBridgeClient
         yield return Environment.GetEnvironmentVariable(HelperOverrideEnvVar);
         yield return Path.Combine(AppContext.BaseDirectory, HelperSubdirectoryName, FrameBridgeProtocol.HelperExeName);
         yield return Path.Combine(AppContext.BaseDirectory, FrameBridgeProtocol.HelperExeName);
-
-        var workspaceRoot = TryFindWorkspaceRoot();
-        if (workspaceRoot is null)
-        {
-            yield break;
-        }
-
-        yield return Path.Combine(workspaceRoot, "daheng_frame_server", "bin", "Release", "net8.0", "win-x64", "publish", FrameBridgeProtocol.HelperExeName);
-        yield return Path.Combine(workspaceRoot, "daheng_frame_server", "bin", "Release", "net8.0", "publish", FrameBridgeProtocol.HelperExeName);
-        yield return Path.Combine(workspaceRoot, "daheng_frame_server", "bin", "Release", "net8.0", "win-x64", FrameBridgeProtocol.HelperExeName);
-        yield return Path.Combine(workspaceRoot, "daheng_frame_server", "bin", "Release", "net8.0", FrameBridgeProtocol.HelperExeName);
     }
 
     private static string? NormalizeHelperCandidate(string? candidate)
@@ -498,20 +852,6 @@ internal static unsafe class DahengFrameBridgeClient
         {
             return null;
         }
-    }
-
-    private static string? TryFindWorkspaceRoot()
-    {
-        for (var current = new DirectoryInfo(AppContext.BaseDirectory); current is not null; current = current.Parent)
-        {
-            if (File.Exists(Path.Combine(current.FullName, "FrameBridgeProtocol.cs")) &&
-                Directory.Exists(Path.Combine(current.FullName, "daheng_frame_server")))
-            {
-                return current.FullName;
-            }
-        }
-
-        return null;
     }
 
     private static bool EnsureBridgeOpenedLocked()
@@ -616,6 +956,74 @@ internal static unsafe class DahengFrameBridgeClient
 
     private readonly record struct FrameHeader(long FrameId, int Width, int Height, int PayloadLength);
 
+    private const uint JobObjectLimitKillOnJobClose = 0x00002000;
+
+    [Flags]
+    private enum JobObjectLimitFlags : uint
+    {
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = JobObjectLimitKillOnJobClose,
+    }
+
+    private enum JOBOBJECTINFOCLASS
+    {
+        JobObjectExtendedLimitInformation = 9,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public JobObjectLimitFlags LimitFlags;
+        public nuint MinimumWorkingSetSize;
+        public nuint MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public nuint Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IO_COUNTERS
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    {
+        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        public IO_COUNTERS IoInfo;
+        public nuint ProcessMemoryLimit;
+        public nuint JobMemoryLimit;
+        public nuint PeakProcessMemoryUsed;
+        public nuint PeakJobMemoryUsed;
+    }
+
+    [DllImport("kernel32.dll", ExactSpelling = true, CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint CreateJobObjectW(nint lpJobAttributes, string? lpName);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetInformationJobObject(
+        nint hJob,
+        JOBOBJECTINFOCLASS jobObjectInformationClass,
+        ref JOBOBJECT_EXTENDED_LIMIT_INFORMATION lpJobObjectInformation,
+        uint cbJobObjectInformationLength);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AssignProcessToJobObject(nint hJob, nint hProcess);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(nint hObject);
+
     private readonly record struct ControlRequest(
         int Flags,
         double ExposureUs,
@@ -627,7 +1035,15 @@ internal static unsafe class DahengFrameBridgeClient
         double ExposureMaxUs,
         double ExposureIncUs,
         double FrameRateHz,
-        int MasterGain);
+        int MasterGain,
+        int CapturePixelFormat,
+        int Width,
+        int Height,
+        int OffsetX,
+        int OffsetY,
+        int BinningX,
+        int BinningY,
+        int BlackLevel);
 }
 
 internal readonly record struct BridgeControlState(
@@ -649,7 +1065,16 @@ internal readonly record struct BridgeControlState(
     int AppliedSequence,
     int RequestSequence,
     bool GainBoostSupported,
-    bool GainBoostEnabled)
+    bool GainBoostEnabled,
+    int PixelFormatCapabilityFlags,
+    int CapturePixelFormat,
+    int Width,
+    int Height,
+    int OffsetX,
+    int OffsetY,
+    int BinningX,
+    int BinningY,
+    int BlackLevel)
 {
     public bool AutoExposureEnabled => (AppliedFlags & FrameBridgeProtocol.ControlFlagAutoExposure) != 0;
     public bool AutoGainEnabled => (AppliedFlags & FrameBridgeProtocol.ControlFlagAutoGain) != 0;

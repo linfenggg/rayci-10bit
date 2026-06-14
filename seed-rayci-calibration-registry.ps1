@@ -1,8 +1,5 @@
 [CmdletBinding()]
-param(
-    [switch]$IncludeCapturedCompatibilityAliases,
-    [switch]$IncludeReverseCompatibilityAliases
-)
+param()
 
 $ErrorActionPreference = 'Stop'
 
@@ -15,19 +12,12 @@ $ueyeApiFullModel = 'uEye UI-154xLE Series'
 $ueyeApiShortModel = 'UI-1545LE-M'
 $displaySerial = '1201EL-U2-1022-0034'
 $displaySerialShort = '10220034'
-$registrySerial = '4103791906'
-$capturedRawSerial = '1145655880'
 $serialTemplate = '1201EL-U2-{KW:2}{Year:2}-{Number:4}'
-$exposureTimes = '30000,45000,70000,100000,150000,200000,300000'
+$exposureTimes = '300,450,700,1000,1500,2000,2500,3000,3500,4000,4500,5000,6000,7000,8000,9000,10000,12000,14000,16000,18000,20000,22500,25000,27500,30000,32500,35000,37500,40000,42500,45000,47500,50000,55000,60000,65000,70000,75000,80000,85000,90000,95000,100000,110000,120000,130000,140000,150000,160000,170000,180000,190000,200000,225000,250000,275000,300000'
 $gain = '1,1.584893192,2.511886432,3.981071706,6.30957344480193'
 $sensorKeyName = '00000028'
-$licensedCameraKeyName = '{0:X8}' -f [uint32]$registrySerial
 $listedSerialKeyName = '{0:X8}' -f [uint32]$displaySerialShort
 $listedFullCameraKeyName = '{0}{1}' -f $sensorKeyName, $listedSerialKeyName
-$listedReverseFullCameraKeyName = '{0}{1}' -f $listedSerialKeyName, $sensorKeyName
-$capturedSerialKeyName = '{0:X8}' -f [uint32]$capturedRawSerial
-$capturedFullCameraKeyName = '{0}{1}' -f $sensorKeyName, $capturedSerialKeyName
-$capturedReverseFullCameraKeyName = '{0}{1}' -f $capturedSerialKeyName, $sensorKeyName
 $baseCalibrationName = 'CinCam CMOS 1201'
 
 function Ensure-Key {
@@ -64,15 +54,15 @@ function Set-CommonCameraBlock {
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$EquipmentName,
         [Parameter(Mandatory = $true)][bool]$IncludeIdentity,
-        [string]$CameraSerialValue = $registrySerial,
-        [string]$GuidLowValue = $licensedCameraKeyName
+        [string]$CameraSerialValue = $displaySerialShort,
+        [string]$GuidLowValue = $listedSerialKeyName
     )
 
     Set-StringValue -Path $Path -Name 'Camera Group' -Value 'CinCam CMOS'
     Set-StringValue -Path $Path -Name 'Technology' -Value 'CMOS'
     Set-StringValue -Path $Path -Name 'Triggering' -Value '0'
     Set-StringValue -Path $Path -Name 'BufferCnt' -Value '4'
-    Set-StringValue -Path $Path -Name 'BitDepth' -Value 'max'
+    Set-StringValue -Path $Path -Name 'BitDepth' -Value '10'
     Set-StringValue -Path $Path -Name 'ColorFormat' -Value 'Y16'
     Set-StringValue -Path $Path -Name 'CameraMode' -Value '0'
     Set-StringValue -Path $Path -Name 'Low Noise Binning' -Value '0'
@@ -89,10 +79,10 @@ function Set-CommonCameraBlock {
     Set-StringValue -Path $Path -Name 'Crop Right' -Value '0'
     Set-StringValue -Path $Path -Name 'Crop Top' -Value '0'
     Set-StringValue -Path $Path -Name 'Crop Bottom' -Value '0'
-    Set-StringValue -Path $Path -Name 'FrameRate' -Value '15'
-    Set-StringValue -Path $Path -Name 'FrameRate_2x2' -Value '15'
-    Set-StringValue -Path $Path -Name 'FrameRate_4x4' -Value '15'
-    Set-StringValue -Path $Path -Name 'FrameRate_8x8' -Value '15'
+    Set-StringValue -Path $Path -Name 'FrameRate' -Value '30'
+    Set-StringValue -Path $Path -Name 'FrameRate_2x2' -Value '30'
+    Set-StringValue -Path $Path -Name 'FrameRate_4x4' -Value '30'
+    Set-StringValue -Path $Path -Name 'FrameRate_8x8' -Value '30'
     Set-StringValue -Path $Path -Name 'Bandwidth' -Value '480'
     Set-StringValue -Path $Path -Name 'PixelClock' -Value '34'
     Set-StringValue -Path $Path -Name 'PixelClock_2x2' -Value '34'
@@ -134,8 +124,8 @@ function Seed-Equipment {
         [Parameter(Mandatory = $true)][string]$CameraKeyPath,
         [Parameter(Mandatory = $true)][string]$EquipmentName,
         [Parameter(Mandatory = $true)][bool]$IncludePerCameraMetadata,
-        [string]$CameraSerialValue = $registrySerial,
-        [string]$GuidLowValue = $licensedCameraKeyName
+        [string]$CameraSerialValue = $displaySerialShort,
+        [string]$GuidLowValue = $listedSerialKeyName
     )
 
     $equipmentPath = Join-Path $CameraKeyPath $EquipmentName
@@ -180,8 +170,8 @@ function Seed-CameraKey {
     param(
         [Parameter(Mandatory = $true)][string]$KeyName,
         [Parameter(Mandatory = $true)][bool]$IncludePerCameraMetadata,
-        [string]$CameraSerialValue = $registrySerial,
-        [string]$GuidLowValue = $licensedCameraKeyName
+        [string]$CameraSerialValue = $displaySerialShort,
+        [string]$GuidLowValue = $listedSerialKeyName
     )
 
     $cameraPath = Join-Path $root $KeyName
@@ -189,7 +179,7 @@ function Seed-CameraKey {
 
     Set-StringValue -Path $cameraPath -Name 'AutoExposure Max' -Value '0.9'
     Set-StringValue -Path $cameraPath -Name 'AutoExposure Min' -Value '0.5'
-    Set-StringValue -Path $cameraPath -Name 'BitDepth' -Value 'max'
+    Set-StringValue -Path $cameraPath -Name 'BitDepth' -Value '10'
     Set-StringValue -Path $cameraPath -Name 'Brightness Factor' -Value '0.003408715 * 1.25'
     Set-StringValue -Path $cameraPath -Name 'Brightness Offset' -Value '13'
     Set-StringValue -Path $cameraPath -Name 'Brightness Val' -Value '20'
@@ -199,7 +189,7 @@ function Seed-CameraKey {
     Set-StringValue -Path $cameraPath -Name 'Crop Bottom' -Value '0'
     Set-StringValue -Path $cameraPath -Name 'Crop Top' -Value '0'
     Set-StringValue -Path $cameraPath -Name 'Equipment' -Value $calibrationName
-    Set-StringValue -Path $cameraPath -Name 'FrameRate' -Value '15'
+    Set-StringValue -Path $cameraPath -Name 'FrameRate' -Value '30'
     Set-StringValue -Path $cameraPath -Name 'Name' -Value $registryModel
     Set-StringValue -Path $cameraPath -Name 'PixelClock' -Value '34'
     Set-StringValue -Path $cameraPath -Name 'Technology' -Value 'CMOS'
@@ -226,7 +216,7 @@ function Seed-CameraKey {
         Set-StringValue -Path $basePlainPath -Name 'AOI CenterY' -Value '0'
         Set-StringValue -Path $basePlainPath -Name 'AOI RadiusX' -Value '2.6'
         Set-StringValue -Path $basePlainPath -Name 'AOI RadiusY' -Value '2.6'
-        Set-StringValue -Path $basePlainPath -Name 'Exposure Times' -Value '100,200,300,450,700,1000,1500,2000,3000,4500,7000,10000,15000,20000,30000,45000,70000,100000,140000'
+        Set-StringValue -Path $basePlainPath -Name 'Exposure Times' -Value $exposureTimes
         Set-StringValue -Path $basePlainPath -Name 'Gain' -Value '1'
         Set-StringValue -Path $basePlainPath -Name 'MirrorY' -Value '1'
         Set-StringValue -Path $basePlainPath -Name 'ScaleX' -Value '1'
@@ -286,35 +276,11 @@ function Seed-CameraKey {
 Ensure-Key -Path $root
 
 $aliases = @(
-    @{ Name = '00000028'; Include = $false; CameraSerial = $displaySerialShort; GuidLow = $listedSerialKeyName },
-    @{ Name = ('{0}{1}' -f $sensorKeyName, $licensedCameraKeyName); Include = $true; CameraSerial = $registrySerial; GuidLow = $licensedCameraKeyName },
-    @{ Name = $licensedCameraKeyName; Include = $true; CameraSerial = $registrySerial; GuidLow = $licensedCameraKeyName },
-    @{ Name = $registrySerial; Include = $true; CameraSerial = $registrySerial; GuidLow = $licensedCameraKeyName },
+    @{ Name = $sensorKeyName; Include = $false; CameraSerial = $displaySerialShort; GuidLow = $listedSerialKeyName },
     @{ Name = $displaySerialShort; Include = $true; CameraSerial = $displaySerialShort; GuidLow = $listedSerialKeyName },
     @{ Name = $listedSerialKeyName; Include = $true; CameraSerial = $displaySerialShort; GuidLow = $listedSerialKeyName },
     @{ Name = $listedFullCameraKeyName; Include = $true; CameraSerial = $displaySerialShort; GuidLow = $listedSerialKeyName }
 )
-
-if ($IncludeReverseCompatibilityAliases) {
-    $aliases += @(
-        @{ Name = ('{0}{1}' -f $licensedCameraKeyName, $sensorKeyName); Include = $true; CameraSerial = $registrySerial; GuidLow = $licensedCameraKeyName },
-        @{ Name = $listedReverseFullCameraKeyName; Include = $true; CameraSerial = $displaySerialShort; GuidLow = $listedSerialKeyName }
-    )
-}
-
-if ($IncludeCapturedCompatibilityAliases) {
-    $aliases += @(
-        @{ Name = $capturedFullCameraKeyName; Include = $true; CameraSerial = $capturedRawSerial; GuidLow = $capturedSerialKeyName },
-        @{ Name = $capturedSerialKeyName; Include = $true; CameraSerial = $capturedRawSerial; GuidLow = $capturedSerialKeyName },
-        @{ Name = $capturedRawSerial; Include = $true; CameraSerial = $capturedRawSerial; GuidLow = $capturedSerialKeyName }
-    )
-
-    if ($IncludeReverseCompatibilityAliases) {
-        $aliases += @(
-            @{ Name = $capturedReverseFullCameraKeyName; Include = $true; CameraSerial = $capturedRawSerial; GuidLow = $capturedSerialKeyName }
-        )
-    }
-}
 
 foreach ($alias in $aliases) {
     Reset-Key -Path (Join-Path $root $alias.Name)
@@ -325,4 +291,4 @@ foreach ($alias in $aliases) {
         -GuidLowValue $alias.GuidLow
 }
 
-Write-Host "Seeded RayCi calibration registry under $root"
+Write-Host "Seeded single-camera RayCi calibration registry under $root"

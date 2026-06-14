@@ -53,21 +53,14 @@ function Copy-OptionalFile {
 
 $repoRoot = Get-FullPath -PathValue $PSScriptRoot
 $ueyeBuildScript = Join-Path $repoRoot 'build-rayci-ueye-bridge.ps1'
-$fgcameraBuildScript = Join-Path $repoRoot 'build-rayci-fgcamera-bridge.ps1'
 $artifactsRoot = Join-Path $repoRoot 'artifacts'
 $ueyeOutput = Join-Path $artifactsRoot 'ueye_proxy'
-$fgcameraOutput = Join-Path $artifactsRoot 'fgcamera_proxy'
 $helperOutput = Join-Path $artifactsRoot 'DahengBridgeHelper'
 $ueyeDll = Join-Path $ueyeOutput 'ueye_api_64.dll'
-$fgcameraDll = Join-Path $fgcameraOutput 'FGCamera.dll'
 $helperExe = Join-Path $helperOutput 'DahengFrameServer.exe'
 
 if ($Rebuild -or -not (Test-Path -LiteralPath $ueyeDll) -or -not (Test-Path -LiteralPath $helperExe)) {
     & $ueyeBuildScript
-}
-
-if ($Rebuild -or -not (Test-Path -LiteralPath $fgcameraDll)) {
-    & $fgcameraBuildScript
 }
 
 $rayciSourceFull = Get-FullPath -PathValue $RayCiSource
@@ -97,26 +90,6 @@ if (Test-Path -LiteralPath $ueyePdb) {
     Copy-Item -LiteralPath $ueyePdb -Destination (Join-Path $outputFull 'ueye_api_64.pdb') -Force
 }
 
-$originalCandidates = @(
-    'C:\Windows\System32\FGCamera.dll',
-    (Join-Path $rayciSourceFull 'FGCamera.dll')
-)
-
-$originalSource = $originalCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-if (-not $originalSource) {
-    throw "No original FGCamera.dll source was found."
-}
-
-Copy-Item -LiteralPath $originalSource -Destination (Join-Path $outputFull 'FGCamera.original.dll') -Force
-
-Write-Host "Installing FGCamera proxy..."
-Copy-Item -LiteralPath $fgcameraDll -Destination (Join-Path $outputFull 'FGCamera.dll') -Force
-
-$fgcameraPdb = Join-Path $fgcameraOutput 'FGCamera.pdb'
-if (Test-Path -LiteralPath $fgcameraPdb) {
-    Copy-Item -LiteralPath $fgcameraPdb -Destination (Join-Path $outputFull 'FGCamera.pdb') -Force
-}
-
 $helperTarget = Join-Path $outputFull 'DahengBridgeHelper'
 Write-Host "Copying Daheng helper runtime..."
 Copy-Tree -SourcePath $helperOutput -DestinationPath $helperTarget
@@ -142,7 +115,6 @@ Write-Host "Portable RayCi hybrid bridge is ready:"
 Write-Host "  Folder : $outputFull"
 Write-Host "  Launch : $(Join-Path $outputFull 'RayCi.exe')"
 Write-Host "  uEye   : $(Join-Path $outputFull 'ueye_api_64.dll')"
-Write-Host "  FGCam  : $(Join-Path $outputFull 'FGCamera.dll')"
+Write-Host "  FGCam  : original file preserved from RayCi install"
 Write-Host "  Helper : $(Join-Path $helperTarget 'DahengFrameServer.exe')"
-Write-Host "  FG logs: $env:LOCALAPPDATA\\Ultron\\RayCiFGCameraBridge\\logs"
 Write-Host "  UE logs: $env:LOCALAPPDATA\\Ultron\\RayCiUeyeBridge\\logs"

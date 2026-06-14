@@ -241,6 +241,34 @@ function Set-CheckboxState {
     }
 }
 
+function Set-CheckboxStateIfEnabled {
+    param(
+        [Parameter(Mandatory = $true)]
+        [Object[]]$Windows,
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [Parameter(Mandatory = $true)]
+        [string]$AutomationId,
+        [bool]$DesiredOn,
+        [int]$DelayMs
+    )
+
+    $state = Get-CheckboxState -Windows $Windows -Name $Name -AutomationId $AutomationId
+    if (-not $state.Enabled) {
+        return [pscustomobject]@{
+            Name         = $Name
+            AutomationId = $AutomationId
+            Before       = $state.ToggleState
+            After        = $state.ToggleState
+            Skipped      = $true
+        }
+    }
+
+    $result = Set-CheckboxState -Windows $Windows -Name $Name -AutomationId $AutomationId -DesiredOn:$DesiredOn -DelayMs $DelayMs
+    $result | Add-Member -NotePropertyName Skipped -NotePropertyValue $false
+    return $result
+}
+
 function Get-CheckboxState {
     param(
         [Parameter(Mandatory = $true)]
@@ -489,6 +517,7 @@ switch ($Action) {
             Get-CheckboxState -Windows $windows -Name 'Auto' -AutomationId '1103'
             Get-ComboSelectionState -Windows $windows -Name 'Exposure Time:' -AutomationId '2057'
             Get-CheckboxState -Windows $windows -Name 'Auto' -AutomationId '1922'
+            Get-ComboSelectionState -Windows $windows -Name 'Gain:' -AutomationId '1229'
             Get-CheckboxState -Windows $windows -Name 'Auto' -AutomationId '1865'
             Get-CheckboxState -Windows $windows -Name 'Reduce Pixel Clock' -AutomationId '1903'
             Get-CheckboxState -Windows $windows -Name 'Baseline' -AutomationId '32783'
@@ -520,41 +549,41 @@ switch ($Action) {
     }
     'gain_auto_off' {
         Select-TabSequence -Windows $windows -TabNames @('Control') -DelayMs $DelayMs
-        Set-CheckboxState -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$false -DelayMs $DelayMs
+        Set-CheckboxStateIfEnabled -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$false -DelayMs $DelayMs
         break
     }
     'gain_auto_on' {
         Select-TabSequence -Windows $windows -TabNames @('Control') -DelayMs $DelayMs
-        Set-CheckboxState -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$true -DelayMs $DelayMs
+        Set-CheckboxStateIfEnabled -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$true -DelayMs $DelayMs
         break
     }
     'gain_0db' {
         Select-TabSequence -Windows $windows -TabNames @('Control') -DelayMs $DelayMs
-        Set-CheckboxState -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$false -DelayMs $DelayMs | Out-Null
+        Set-CheckboxStateIfEnabled -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$false -DelayMs $DelayMs | Out-Null
         Set-ComboSelectionState -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Gain:' -AutomationId '1229' -DesiredItemName '0 dB ( 1.0x )' -DelayMs $DelayMs
         break
     }
     'gain_4db' {
         Select-TabSequence -Windows $windows -TabNames @('Control') -DelayMs $DelayMs
-        Set-CheckboxState -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$false -DelayMs $DelayMs | Out-Null
+        Set-CheckboxStateIfEnabled -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$false -DelayMs $DelayMs | Out-Null
         Set-ComboSelectionState -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Gain:' -AutomationId '1229' -DesiredItemName '4 dB ( 1.6x )' -DelayMs $DelayMs
         break
     }
     'gain_8db' {
         Select-TabSequence -Windows $windows -TabNames @('Control') -DelayMs $DelayMs
-        Set-CheckboxState -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$false -DelayMs $DelayMs | Out-Null
+        Set-CheckboxStateIfEnabled -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$false -DelayMs $DelayMs | Out-Null
         Set-ComboSelectionState -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Gain:' -AutomationId '1229' -DesiredItemName '8 dB ( 2.5x )' -DelayMs $DelayMs
         break
     }
     'gain_12db' {
         Select-TabSequence -Windows $windows -TabNames @('Control') -DelayMs $DelayMs
-        Set-CheckboxState -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$false -DelayMs $DelayMs | Out-Null
+        Set-CheckboxStateIfEnabled -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$false -DelayMs $DelayMs | Out-Null
         Set-ComboSelectionState -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Gain:' -AutomationId '1229' -DesiredItemName '12 dB ( 4.0x )' -DelayMs $DelayMs
         break
     }
     'gain_16db' {
         Select-TabSequence -Windows $windows -TabNames @('Control') -DelayMs $DelayMs
-        Set-CheckboxState -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$false -DelayMs $DelayMs | Out-Null
+        Set-CheckboxStateIfEnabled -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Auto' -AutomationId '1922' -DesiredOn:$false -DelayMs $DelayMs | Out-Null
         Set-ComboSelectionState -Windows @(Get-RayCiWindows -TargetProcessName $ProcessName) -Name 'Gain:' -AutomationId '1229' -DesiredItemName '16 dB ( 6.3x )' -DelayMs $DelayMs
         break
     }

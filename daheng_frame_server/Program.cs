@@ -8,6 +8,12 @@ return app.Run(args);
 
 internal sealed class DahengFrameServerApp
 {
+    private const string Mer13030UmUsb2ModelPrefix = "MER-130-30UM";
+    private const double Mer13030UmUsb2MinimumOperationalExposureUs = 30000.0;
+    private const double Mer13030UmUsb2MinimumOperationalGainDb = 8.0;
+    private const double Mer13030UmUsb2NominalFrameRateMinHz = 1.0;
+    private const double Mer13030UmUsb2NominalFrameRateMaxHz = 30.0;
+    private const double Mer13030UmUsb2NominalFrameRateIncHz = 0.1;
     private static readonly string LogDirectory = ResolveLogDirectory();
     private static readonly string LogPath = Path.Combine(LogDirectory, "daheng_frame_server.log");
     private const double DefaultStartupFrameRate = 15.0;
@@ -41,10 +47,13 @@ internal sealed class DahengFrameServerApp
     private long _publishedFrameId;
     private int _lastAppliedRequestSequence;
     private bool _loggedNativeSamplePreview;
+    private int _frameStatsTraceCount;
     private readonly SimulationPattern _simulationPattern = GetSimulationPattern();
+    private byte[] _capturedFrameBuffer = Array.Empty<byte>();
     private ushort[] _simulationFrameBuffer = Array.Empty<ushort>();
     private double[] _simulationXProfile = Array.Empty<double>();
     private double[] _simulationYProfile = Array.Empty<double>();
+    private CameraRuntimeProfile? _activeCameraProfile;
 
     private static string ResolveLogDirectory()
     {
@@ -153,7 +162,7 @@ internal sealed class DahengFrameServerApp
             var serial = FindCameraSerial(1000);
             if (serial is null)
             {
-                Console.WriteLine("No Daheng USB/U3V camera found.");
+                Console.WriteLine($"No Daheng USB/U3V camera matching model prefix {Mer13030UmUsb2ModelPrefix} found.");
                 return 2;
             }
 
@@ -217,7 +226,7 @@ internal sealed class DahengFrameServerApp
             for (var i = 0; i < devices.Count; i++)
             {
                 var device = devices[i];
-                Console.WriteLine($"[{i}] SN={device.GetSN()} Vendor={device.GetVendorName()} Model={device.GetModelName()} Class={device.GetDeviceClass()} USB={IsUsbDevice(device)}");
+                Console.WriteLine($"[{i}] SN={device.GetSN()} Vendor={device.GetVendorName()} Model={device.GetModelName()} Class={device.GetDeviceClass()} USB={IsUsbDevice(device)} Target={IsTargetUsbDevice(device, requestedSerial: null)}");
             }
 
             return devices.Count > 0 ? 0 : 2;
@@ -248,12 +257,15 @@ internal sealed class DahengFrameServerApp
             _factory.Init();
             _formatConvert = _factory.CreateImageFormatConvert();
 
-            var serial = FindCameraSerial(1500);
-            if (serial is null)
+            var deviceInfo = TryFindPreferredUsbDeviceInfo();
+            if (deviceInfo is null)
             {
-                Console.WriteLine("No Daheng USB/U3V camera found.");
+                Console.WriteLine($"No Daheng USB/U3V camera matching model prefix {Mer13030UmUsb2ModelPrefix} found.");
                 return 2;
             }
+
+            _activeCameraProfile = CameraRuntimeProfile.FromDeviceInfo(deviceInfo);
+            var serial = deviceInfo.GetSN();
 
             IGXDevice? device = null;
             IGXStream? stream = null;
@@ -450,8 +462,13 @@ internal sealed class DahengFrameServerApp
                 device = OpenDeviceForCapture(serial);
                 remote = device.GetRemoteFeatureControl();
                 LogCameraCapabilities(remote);
-                ConfigureCamera(remote);
-                InitializeControlState(remote, accessor, frameMutex);
+                var startupFrameRateHz = ConfigureCamera(remote);
+                InitializeControlState(
+                    ApplyCompatibleFrameRateOverride(
+                        ReadCurrentControlState(remote),
+                        startupFrameRateHz),
+                    accessor,
+                    frameMutex);
 
                 stream = device.OpenStream(0);
                 ConfigureStream(stream);
@@ -626,6 +643,7 @@ internal sealed class DahengFrameServerApp
     {
         if (forceSimulation)
         {
+            _activeCameraProfile = null;
             Log("simulation forced by argument or environment");
             return new CaptureSource(true, null);
         }
@@ -640,10 +658,13 @@ internal sealed class DahengFrameServerApp
 
             if (deviceInfo is not null)
             {
+                _activeCameraProfile = CameraRuntimeProfile.FromDeviceInfo(deviceInfo);
+                Log($"selected camera SN={deviceInfo.GetSN()} vendor={deviceInfo.GetVendorName()} model={deviceInfo.GetModelName()} startupPixelFormat={_activeCameraProfile.Value.DefaultPixelFormat} startupSize={_activeCameraProfile.Value.DefaultWidth}x{_activeCameraProfile.Value.DefaultHeight} reverse={_activeCameraProfile.Value.DefaultReverseX},{_activeCameraProfile.Value.DefaultReverseY} exposureUs={_activeCameraProfile.Value.DefaultExposureUs:F2} gainDb={_activeCameraProfile.Value.DefaultGainDb:F2} frameRateHz={_activeCameraProfile.Value.DefaultFrameRateHz:F3}");
                 PublishStatus(accessor, frameMutex, FrameBridgeProtocol.StatusWaiting, 0, 0, 0, 0);
                 return new CaptureSource(false, deviceInfo.GetSN());
             }
 
+            _activeCameraProfile = null;
             PublishStatus(accessor, frameMutex, FrameBridgeProtocol.StatusNoCamera, 0, 0, 0, 0);
             if (firstNoCameraUtc == DateTime.MinValue)
             {
@@ -653,6 +674,7 @@ internal sealed class DahengFrameServerApp
             if (autoSimulationFallback && DateTime.UtcNow - firstNoCameraUtc >= TimeSpan.FromMilliseconds(autoSimulationDelayMs))
             {
                 Log($"no Daheng camera detected after {autoSimulationDelayMs} ms, switching to synthetic camera mode");
+                _activeCameraProfile = null;
                 return new CaptureSource(true, null);
             }
 
@@ -675,11 +697,7 @@ internal sealed class DahengFrameServerApp
         var devices = new List<IGXDeviceInfo>();
         _factory.UpdateAllDeviceList(500, devices);
 
-        return devices.FirstOrDefault(device =>
-                IsUsbDevice(device) &&
-                (string.IsNullOrWhiteSpace(requestedSerial) ||
-                 string.Equals(device.GetSN(), requestedSerial, StringComparison.OrdinalIgnoreCase)))
-            ?? devices.FirstOrDefault(IsUsbDevice);
+        return devices.FirstOrDefault(device => IsTargetUsbDevice(device, requestedSerial));
     }
 
     private IGXDevice OpenDeviceForCapture(string serial)
@@ -711,23 +729,28 @@ internal sealed class DahengFrameServerApp
         }
     }
 
-    private void ConfigureCamera(IGXFeatureControl remote)
+    private double? ConfigureCamera(IGXFeatureControl remote)
     {
         TryLoadDefaultUserSet(remote);
         TrySetEnum(remote, "AcquisitionMode", "Continuous");
         TrySetEnum(remote, "TriggerMode", "Off");
         ConfigurePixelFormat(remote);
         ConfigureGeometry(remote);
-        TrySetBool(remote, "ReverseX", GetEnvironmentBool("BEAMMIC_DAHENG_REVERSE_X", DefaultReverseX));
-        TrySetBool(remote, "ReverseY", GetEnvironmentBool("BEAMMIC_DAHENG_REVERSE_Y", DefaultReverseY));
+        TrySetBool(remote, "ReverseX", ResolveStartupReverseX());
+        TrySetBool(remote, "ReverseY", ResolveStartupReverseY());
         TrySetEnum(remote, "ExposureAuto", "Off");
         TrySetEnum(remote, "GainAuto", "Off");
-        TrySetEnum(remote, "AcquisitionFrameRateMode", "On");
-        TrySetFloat(remote, "ExposureTime", GetEnvironmentDouble("BEAMMIC_DAHENG_EXPOSURE_US", GetEnvironmentDouble("VIRTUAL_UEYE_DAHENG_EXPOSURE_US", DefaultStartupExposureUs)));
-        TrySetFloat(remote, "Gain", GetEnvironmentDouble("BEAMMIC_DAHENG_GAIN_DB", GetEnvironmentDouble("VIRTUAL_UEYE_DAHENG_GAIN_DB", DefaultStartupGainDb)));
-        TrySetFrameRate(remote, GetEnvironmentDouble("BEAMMIC_DAHENG_FPS", GetEnvironmentDouble("VIRTUAL_UEYE_DAHENG_FPS", DefaultStartupFrameRate)));
-        var startupState = ReadCurrentControlState(remote);
+        var startupFrameRateHz = ResolveStartupFrameRateHz();
+        TrySetEnum(remote, "AcquisitionFrameRateMode", startupFrameRateHz is > 0.0 ? "On" : "Off");
+        TrySetExposure(remote, ResolveStartupExposureUs());
+        TrySetGain(remote, ResolveStartupGainDb());
+        if (startupFrameRateHz is > 0.0)
+        {
+            TrySetFrameRate(remote, startupFrameRateHz.Value);
+        }
+        var startupState = ApplyCompatibleFrameRateOverride(ReadCurrentControlState(remote), startupFrameRateHz);
         Log($"configured startup reverseX={ReadBoolValue(remote, "ReverseX")} reverseY={ReadBoolValue(remote, "ReverseY")} exposureUs={startupState.ExposureUs:F2} gainDb={startupState.GainDb:F2} frameRateHz={startupState.FrameRateHz:F3}");
+        return startupFrameRateHz;
     }
 
     private static void TryLoadDefaultUserSet(IGXFeatureControl remote)
@@ -756,8 +779,14 @@ internal sealed class DahengFrameServerApp
     {
         var sensorWidth = ReadSensorDimension(remote, "SensorWidth", "WidthMax", "Width", FrameBridgeProtocol.TargetWidth);
         var sensorHeight = ReadSensorDimension(remote, "SensorHeight", "HeightMax", "Height", FrameBridgeProtocol.TargetHeight);
-        var requestedWidth = GetEnvironmentInt("BEAMMIC_DAHENG_START_WIDTH", sensorWidth);
-        var requestedHeight = GetEnvironmentInt("BEAMMIC_DAHENG_START_HEIGHT", sensorHeight);
+        var startupWidth = _activeCameraProfile.HasValue && _activeCameraProfile.Value.DefaultWidth > 0
+            ? _activeCameraProfile.Value.DefaultWidth
+            : sensorWidth;
+        var startupHeight = _activeCameraProfile.HasValue && _activeCameraProfile.Value.DefaultHeight > 0
+            ? _activeCameraProfile.Value.DefaultHeight
+            : sensorHeight;
+        var requestedWidth = GetEnvironmentInt("BEAMMIC_DAHENG_START_WIDTH", startupWidth);
+        var requestedHeight = GetEnvironmentInt("BEAMMIC_DAHENG_START_HEIGHT", startupHeight);
         TryApplyRequestedGeometry(remote, requestedWidth, requestedHeight, 0, 0, 1, 1);
     }
 
@@ -1278,19 +1307,19 @@ internal sealed class DahengFrameServerApp
 
         if (!wantAutoExposure)
         {
-            TrySetFloat(remote, "ExposureTime", requestedExposureUs);
+            TrySetExposure(remote, requestedExposureUs);
         }
 
         if (!wantAutoGain)
         {
             if (double.IsFinite(requestedGainDb))
             {
-                TrySetFloat(remote, "Gain", requestedGainDb);
+                TrySetGain(remote, requestedGainDb);
             }
             else
             {
                 var state = ReadCurrentControlState(remote);
-                TrySetFloat(remote, "Gain", ToGainDb(requestedMasterGain, state.GainMinDb, state.GainMaxDb));
+                TrySetGain(remote, ToGainDb(requestedMasterGain, state.GainMinDb, state.GainMaxDb));
             }
         }
 
@@ -1301,7 +1330,7 @@ internal sealed class DahengFrameServerApp
             TrySetFrameRate(remote, requestedFrameRateHz);
         }
 
-        var appliedState = ReadCurrentControlState(remote);
+        var appliedState = ApplyCompatibleFrameRateOverride(ReadCurrentControlState(remote), requestedFrameRateHz);
 
         using (AcquireMutex(frameMutex, 250))
         {
@@ -1553,11 +1582,18 @@ internal sealed class DahengFrameServerApp
             return value;
         }
 
+        var maxValue = (1u << bitDepth) - 1u;
+        var raw = (uint)value;
+
+        if (raw <= maxValue)
+        {
+            return (ushort)raw;
+        }
+
         var shift = 16 - bitDepth;
         var rounding = 1u << (shift - 1);
-        var maxValue = (1u << bitDepth) - 1u;
-        var quantized = Math.Min(maxValue, (((uint)value) + rounding) >> shift);
-        return (ushort)(quantized << shift);
+        var quantized = Math.Min(maxValue, (raw + rounding) >> shift);
+        return (ushort)quantized;
     }
 
     private static ushort NormalizeToMono16ContainerSample(ushort value, int bitDepth)
@@ -1567,23 +1603,25 @@ internal sealed class DahengFrameServerApp
             return value;
         }
 
-        var shift = 16 - bitDepth;
         var maxValue = (1u << bitDepth) - 1u;
         var raw = (uint)value;
-        if ((raw & ~maxValue) == 0)
+
+        if (raw <= maxValue)
         {
-            return (ushort)(raw << shift);
+            return (ushort)raw;
         }
 
+        var shift = 16 - bitDepth;
         var containerMask = maxValue << shift;
         var paddingMask = (1u << shift) - 1u;
         if ((raw & ~containerMask) == 0 && (raw & paddingMask) == 0)
         {
-            return value;
+            return (ushort)(raw >> shift);
         }
 
-        var quantized = Math.Min(maxValue, raw >> shift);
-        return (ushort)(quantized << shift);
+        var rounding = 1u << (shift - 1);
+        var quantized = Math.Min(maxValue, (raw + rounding) >> shift);
+        return (ushort)quantized;
     }
 
     private static uint HashSimulationNoise(uint x, uint y, uint frameId)
@@ -1622,6 +1660,8 @@ internal sealed class DahengFrameServerApp
                 {
                     destination[i] = source[i];
                 }
+
+                LogMono16Stats("mono8-converted", destination, count, pixelFormat, 8);
             }
 
             buffer = _convertBuffer;
@@ -1666,6 +1706,8 @@ internal sealed class DahengFrameServerApp
                 {
                     destination[i] = NormalizeToMono16ContainerSample(source[i], bitDepth);
                 }
+
+                LogMono16Stats("native-normalized", destination, count, pixelFormat, bitDepth);
             }
 
             buffer = _convertBuffer;
@@ -1688,6 +1730,10 @@ internal sealed class DahengFrameServerApp
             if (TryGetConvertedMonoBitDepth(pixelFormat, out var convertedBitDepth))
             {
                 NormalizeConvertedMono16Container(_convertBuffer, width, height, convertedBitDepth);
+                unsafe
+                {
+                    LogMono16Stats("converted-normalized", (ushort*)_convertBuffer.ToPointer(), checked(width * height), pixelFormat, convertedBitDepth);
+                }
             }
             buffer = _convertBuffer;
             return buffer != IntPtr.Zero;
@@ -1697,6 +1743,44 @@ internal sealed class DahengFrameServerApp
             Log($"conversion failed for {pixelFormat}: {ex.Message}");
             return false;
         }
+    }
+
+    private unsafe void LogMono16Stats(string source, ushort* samples, int count, GX_PIXEL_FORMAT_ENTRY pixelFormat, int bitDepth)
+    {
+        if (_frameStatsTraceCount >= 8 || samples is null || count <= 0)
+        {
+            return;
+        }
+
+        _frameStatsTraceCount++;
+        ushort min = ushort.MaxValue;
+        ushort max = 0;
+        ulong sum = 0;
+        var nonZero = 0;
+
+        for (var i = 0; i < count; i++)
+        {
+            var value = samples[i];
+            if (value < min)
+            {
+                min = value;
+            }
+
+            if (value > max)
+            {
+                max = value;
+            }
+
+            if (value != 0)
+            {
+                nonZero++;
+            }
+
+            sum += value;
+        }
+
+        var mean = sum / (double)count;
+        Log($"mono stats source={source} pixelFormat={pixelFormat} bitDepth={bitDepth} min=0x{min:X4} max=0x{max:X4} mean={mean:F2} nonZero={nonZero}/{count}");
     }
 
     private static bool TryGetNativeMonoBitDepth(GX_PIXEL_FORMAT_ENTRY pixelFormat, out int bitDepth)
@@ -1780,16 +1864,32 @@ internal sealed class DahengFrameServerApp
         _convertBufferSize = requiredSize;
     }
 
+    private void EnsureCapturedFrameBuffer()
+    {
+        if (_capturedFrameBuffer.Length == FrameBridgeProtocol.FrameByteCount)
+        {
+            return;
+        }
+
+        _capturedFrameBuffer = new byte[FrameBridgeProtocol.FrameByteCount];
+    }
+
     private unsafe void PublishFrame(MemoryMappedViewAccessor accessor, Mutex frameMutex, IntPtr frameData, int sourceWidth, int sourceHeight)
     {
         using var holder = AcquireMutex(frameMutex, 250);
         var nextFrameId = Interlocked.Increment(ref _publishedFrameId);
-        var payloadLength = checked(sourceWidth * sourceHeight * FrameBridgeProtocol.TargetBytesPerPixel);
+
+        if (sourceWidth <= 0 || sourceHeight <= 0)
+        {
+            return;
+        }
+
+        var payloadLength = FrameBridgeProtocol.FrameByteCount;
         accessor.Write(FrameBridgeProtocol.MagicOffset, FrameBridgeProtocol.Magic);
         accessor.Write(FrameBridgeProtocol.VersionOffset, FrameBridgeProtocol.Version);
-        accessor.Write(FrameBridgeProtocol.WidthOffset, sourceWidth);
-        accessor.Write(FrameBridgeProtocol.HeightOffset, sourceHeight);
-        accessor.Write(FrameBridgeProtocol.StrideOffset, sourceWidth * FrameBridgeProtocol.TargetBytesPerPixel);
+        accessor.Write(FrameBridgeProtocol.WidthOffset, FrameBridgeProtocol.TargetWidth);
+        accessor.Write(FrameBridgeProtocol.HeightOffset, FrameBridgeProtocol.TargetHeight);
+        accessor.Write(FrameBridgeProtocol.StrideOffset, FrameBridgeProtocol.TargetStride);
         accessor.Write(FrameBridgeProtocol.PixelFormatOffset, FrameBridgeProtocol.PixelFormatMono16);
         accessor.Write(FrameBridgeProtocol.StatusOffset, FrameBridgeProtocol.StatusStreaming);
         accessor.Write(FrameBridgeProtocol.PayloadLengthOffset, payloadLength);
@@ -1801,7 +1901,27 @@ internal sealed class DahengFrameServerApp
         accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref mapPointer);
         try
         {
-            Buffer.MemoryCopy((void*)frameData, mapPointer + FrameBridgeProtocol.HeaderSize, FrameBridgeProtocol.FrameByteCount, payloadLength);
+            if (sourceWidth != FrameBridgeProtocol.TargetWidth || sourceHeight != FrameBridgeProtocol.TargetHeight)
+            {
+                EnsureCapturedFrameBuffer();
+                ResizeToTarget((ushort*)frameData.ToPointer(), sourceWidth, sourceHeight, _capturedFrameBuffer);
+                fixed (byte* sourceBytes = _capturedFrameBuffer)
+                {
+                    Buffer.MemoryCopy(
+                        sourceBytes,
+                        mapPointer + FrameBridgeProtocol.HeaderSize,
+                        FrameBridgeProtocol.FrameByteCount,
+                        payloadLength);
+                }
+            }
+            else
+            {
+                Buffer.MemoryCopy(
+                    (void*)frameData,
+                    mapPointer + FrameBridgeProtocol.HeaderSize,
+                    FrameBridgeProtocol.FrameByteCount,
+                    payloadLength);
+            }
         }
         finally
         {
@@ -1920,11 +2040,7 @@ internal sealed class DahengFrameServerApp
         {
             var devices = new List<IGXDeviceInfo>();
             factory.UpdateAllDeviceList(500, devices);
-            var device = devices.FirstOrDefault(deviceInfo =>
-                    IsUsbDevice(deviceInfo) &&
-                    (string.IsNullOrWhiteSpace(requestedSerial) ||
-                     string.Equals(deviceInfo.GetSN(), requestedSerial, StringComparison.OrdinalIgnoreCase)))
-                ?? devices.FirstOrDefault(IsUsbDevice);
+            var device = devices.FirstOrDefault(deviceInfo => IsTargetUsbDevice(deviceInfo, requestedSerial));
             if (device is not null)
             {
                 return device.GetSN();
@@ -2000,12 +2116,14 @@ internal sealed class DahengFrameServerApp
         }
     }
 
-    private static void ConfigurePixelFormat(IGXFeatureControl remote)
+    private void ConfigurePixelFormat(IGXFeatureControl remote)
     {
-        var requested = Environment.GetEnvironmentVariable("BEAMMIC_DAHENG_PIXEL_FORMAT");
+        var requested =
+            Environment.GetEnvironmentVariable("BEAMMIC_DAHENG_PIXEL_FORMAT") ??
+            Environment.GetEnvironmentVariable("VIRTUAL_UEYE_DAHENG_PIXEL_FORMAT");
         if (string.IsNullOrWhiteSpace(requested))
         {
-            requested = "AutoHighBit";
+            requested = _activeCameraProfile?.DefaultPixelFormat ?? "Mono10";
         }
 
         var candidates = new List<string>();
@@ -2307,15 +2425,16 @@ internal sealed class DahengFrameServerApp
             return new BlackLevelState(false, 0.0, 0.0, 0.0, 0.0, 0);
         }
 
-        var targetMax = Math.Min(max, min + BeamMicBlackLevelDeviceMax);
-        if (targetMax <= min)
+        var effectiveMin = min < 0.0 && max > 0.0 ? 0.0 : min;
+        var targetMax = Math.Min(max, effectiveMin + BeamMicBlackLevelDeviceMax);
+        if (targetMax <= effectiveMin)
         {
-            return new BlackLevelState(false, value, min, max, increment, 0);
+            return new BlackLevelState(false, value, effectiveMin, max, increment, 0);
         }
 
-        var clampedValue = Math.Clamp(value, min, targetMax);
-        var logical = Math.Clamp((int)Math.Round((clampedValue - min) / (targetMax - min) * BeamMicBlackLevelMax), BeamMicBlackLevelMin, BeamMicBlackLevelMax);
-        return new BlackLevelState(true, clampedValue, min, targetMax, increment, logical);
+        var clampedValue = Math.Clamp(value, effectiveMin, targetMax);
+        var logical = Math.Clamp((int)Math.Round((clampedValue - effectiveMin) / (targetMax - effectiveMin) * BeamMicBlackLevelMax), BeamMicBlackLevelMin, BeamMicBlackLevelMax);
+        return new BlackLevelState(true, clampedValue, effectiveMin, targetMax, increment, logical);
     }
 
     private static bool TrySetBlackLevel(IGXFeatureControl remote, int beamMicBlackLevel)
@@ -2433,6 +2552,48 @@ internal sealed class DahengFrameServerApp
         }
     }
 
+    private void TrySetExposure(IGXFeatureControl remote, double requestedExposureUs)
+    {
+        if (!remote.IsImplemented("ExposureTime"))
+        {
+            return;
+        }
+
+        try
+        {
+            var feature = remote.GetFloatFeature("ExposureTime");
+            var deviceMinExposureUs = feature.GetMin();
+            var deviceMaxExposureUs = feature.GetMax();
+            var effectiveMinExposureUs = ResolveEffectiveMinExposureUs(deviceMinExposureUs, deviceMaxExposureUs);
+            feature.SetValue(Math.Clamp(requestedExposureUs, effectiveMinExposureUs, deviceMaxExposureUs));
+        }
+        catch
+        {
+            // Ignore unsupported exposure features.
+        }
+    }
+
+    private void TrySetGain(IGXFeatureControl remote, double requestedGainDb)
+    {
+        if (!remote.IsImplemented("Gain"))
+        {
+            return;
+        }
+
+        try
+        {
+            var feature = remote.GetFloatFeature("Gain");
+            var deviceMinGainDb = feature.GetMin();
+            var deviceMaxGainDb = feature.GetMax();
+            var effectiveMinGainDb = ResolveEffectiveMinGainDb(deviceMinGainDb, deviceMaxGainDb);
+            feature.SetValue(Math.Clamp(requestedGainDb, effectiveMinGainDb, deviceMaxGainDb));
+        }
+        catch
+        {
+            // Ignore unsupported gain features.
+        }
+    }
+
     private static void TrySetFrameRate(IGXFeatureControl remote, double value)
     {
         if (!remote.IsImplemented("AcquisitionFrameRate"))
@@ -2504,7 +2665,14 @@ internal sealed class DahengFrameServerApp
             return;
         }
 
-        remote.GetCommandFeature(featureName).Execute();
+        try
+        {
+            remote.GetCommandFeature(featureName).Execute();
+        }
+        catch (Exception ex) when (IsNonFatalCommandError(featureName, ex))
+        {
+            Log($"ignoring non-fatal {featureName} error: {ex.Message}");
+        }
     }
 
     private static void ExecuteCommand(IGXFeatureControl remote, string featureName)
@@ -2518,10 +2686,22 @@ internal sealed class DahengFrameServerApp
         {
             remote.GetCommandFeature(featureName).Execute();
         }
-        catch (Exception ex) when (featureName == "AcquisitionStart" && ex.ToString().Contains("STATUS_IN_WORK", StringComparison.OrdinalIgnoreCase))
+        catch (Exception ex) when (IsNonFatalCommandError(featureName, ex))
         {
-            // Some USB2 cameras report STATUS_IN_WORK when acquisition is already armed.
+            Log($"ignoring non-fatal {featureName} error: {ex.Message}");
         }
+    }
+
+    private static bool IsNonFatalCommandError(string featureName, Exception ex)
+    {
+        if (featureName == "AcquisitionStart" &&
+            ex.ToString().Contains("STATUS_IN_WORK", StringComparison.OrdinalIgnoreCase))
+        {
+            // Some Galaxy USB2 cameras report STATUS_IN_WORK when acquisition is already armed.
+            return true;
+        }
+
+        return false;
     }
 
     private static bool IsTimeout(Exception ex)
@@ -2565,6 +2745,52 @@ internal sealed class DahengFrameServerApp
         return double.TryParse(raw, out var value) ? value : fallback;
     }
 
+    private static bool TryGetEnvironmentDouble(string name, out double value)
+    {
+        var raw = Environment.GetEnvironmentVariable(name);
+        return double.TryParse(raw, out value);
+    }
+
+    private bool ResolveStartupReverseX()
+    {
+        var fallback = _activeCameraProfile?.DefaultReverseX ?? DefaultReverseX;
+        return GetEnvironmentBool("BEAMMIC_DAHENG_REVERSE_X", GetEnvironmentBool("VIRTUAL_UEYE_DAHENG_REVERSE_X", fallback));
+    }
+
+    private bool ResolveStartupReverseY()
+    {
+        var fallback = _activeCameraProfile?.DefaultReverseY ?? DefaultReverseY;
+        return GetEnvironmentBool("BEAMMIC_DAHENG_REVERSE_Y", GetEnvironmentBool("VIRTUAL_UEYE_DAHENG_REVERSE_Y", fallback));
+    }
+
+    private double ResolveStartupExposureUs()
+    {
+        var fallback = _activeCameraProfile?.DefaultExposureUs ?? DefaultStartupExposureUs;
+        return GetEnvironmentDouble("BEAMMIC_DAHENG_EXPOSURE_US", GetEnvironmentDouble("VIRTUAL_UEYE_DAHENG_EXPOSURE_US", fallback));
+    }
+
+    private double ResolveStartupGainDb()
+    {
+        var fallback = _activeCameraProfile?.DefaultGainDb ?? DefaultStartupGainDb;
+        return GetEnvironmentDouble("BEAMMIC_DAHENG_GAIN_DB", GetEnvironmentDouble("VIRTUAL_UEYE_DAHENG_GAIN_DB", fallback));
+    }
+
+    private double? ResolveStartupFrameRateHz()
+    {
+        if (TryGetEnvironmentDouble("BEAMMIC_DAHENG_FPS", out var beamMicFrameRateHz))
+        {
+            return beamMicFrameRateHz > 0.0 ? beamMicFrameRateHz : null;
+        }
+
+        if (TryGetEnvironmentDouble("VIRTUAL_UEYE_DAHENG_FPS", out var virtualFrameRateHz))
+        {
+            return virtualFrameRateHz > 0.0 ? virtualFrameRateHz : null;
+        }
+
+        var fallback = _activeCameraProfile?.DefaultFrameRateHz ?? DefaultStartupFrameRate;
+        return fallback > 0.0 ? fallback : null;
+    }
+
     private static bool IsSimulationForced()
     {
         return GetEnvironmentBool("ULTRON_RAYCI_SIMULATE", GetEnvironmentBool("BEAMMIC_DAHENG_SIMULATE", false));
@@ -2572,7 +2798,7 @@ internal sealed class DahengFrameServerApp
 
     private static bool IsAutoSimulationFallbackEnabled()
     {
-        return GetEnvironmentBool("ULTRON_RAYCI_AUTO_SIMULATE", GetEnvironmentBool("BEAMMIC_DAHENG_AUTO_SIMULATE", true));
+        return GetEnvironmentBool("ULTRON_RAYCI_AUTO_SIMULATE", GetEnvironmentBool("BEAMMIC_DAHENG_AUTO_SIMULATE", false));
     }
 
     private static bool GetEnvironmentBool(string name, bool fallback)
@@ -2622,10 +2848,14 @@ internal sealed class DahengFrameServerApp
         };
     }
 
-    private static BridgeControlState ReadCurrentControlState(IGXFeatureControl remote)
+    private BridgeControlState ReadCurrentControlState(IGXFeatureControl remote)
     {
         var exposureState = ReadFloatState(remote, "ExposureTime");
+        var effectiveExposureMinUs = ResolveEffectiveMinExposureUs(exposureState.Min, exposureState.Max);
+        var effectiveExposureUs = Math.Clamp(exposureState.Value, effectiveExposureMinUs, exposureState.Max);
         var gainState = ReadFloatState(remote, "Gain");
+        var effectiveGainMinDb = ResolveEffectiveMinGainDb(gainState.Min, gainState.Max);
+        var effectiveGainDb = Math.Clamp(gainState.Value, effectiveGainMinDb, gainState.Max);
         var frameRateState = ReadFrameRateState(remote);
         var blackLevelState = ReadBlackLevelState(remote);
         var currentPixelFormat = ReadEnumValue(remote, "PixelFormat");
@@ -2650,30 +2880,126 @@ internal sealed class DahengFrameServerApp
             flags |= FrameBridgeProtocol.ControlFlagAutoGain;
         }
 
+        var effectiveFrameRateState = ResolveReportedFrameRateState(remote, frameRateState);
+
         return new BridgeControlState(
             Flags: flags,
-            ExposureUs: exposureState.Value,
-            ExposureMinUs: exposureState.Min,
+            ExposureUs: effectiveExposureUs,
+            ExposureMinUs: effectiveExposureMinUs,
             ExposureMaxUs: exposureState.Max,
             ExposureIncUs: exposureState.Increment,
-            GainDb: gainState.Value,
-            GainMinDb: gainState.Min,
+            GainDb: effectiveGainDb,
+            GainMinDb: effectiveGainMinDb,
             GainMaxDb: gainState.Max,
             GainIncDb: gainState.Increment,
             BlackLevel: blackLevelState.IsImplemented ? blackLevelState.LogicalValue : 49,
-            FrameRateHz: frameRateState.Value,
-            FrameRateMinHz: frameRateState.Min,
-            FrameRateMaxHz: frameRateState.Max,
-            FrameRateIncHz: frameRateState.Increment,
+            FrameRateHz: effectiveFrameRateState.Value,
+            FrameRateMinHz: effectiveFrameRateState.Min,
+            FrameRateMaxHz: effectiveFrameRateState.Max,
+            FrameRateIncHz: effectiveFrameRateState.Increment,
             CapturePixelFormat: ToCapturePixelFormat(currentPixelFormat),
             PixelFormatCapabilityFlags: pixelFormatFlags,
-            MasterGain: ToMasterGain(gainState.Value, gainState.Min, gainState.Max),
+            MasterGain: ToMasterGain(effectiveGainDb, effectiveGainMinDb, gainState.Max),
             Width: currentWidth * Math.Max(1, samplingX),
             Height: currentHeight * Math.Max(1, samplingY),
             OffsetX: offsetX * Math.Max(1, samplingX),
             OffsetY: offsetY * Math.Max(1, samplingY),
             BinningX: Math.Max(1, samplingX),
             BinningY: Math.Max(1, samplingY));
+    }
+
+    private double ResolveEffectiveMinExposureUs(double deviceMinExposureUs, double deviceMaxExposureUs)
+    {
+        if (!(deviceMaxExposureUs > deviceMinExposureUs))
+        {
+            return deviceMinExposureUs;
+        }
+
+        var profileFloor = _activeCameraProfile?.MinimumOperationalExposureUs ?? deviceMinExposureUs;
+        var configuredFloor = GetEnvironmentDouble(
+            "BEAMMIC_DAHENG_MIN_EXPOSURE_US",
+            GetEnvironmentDouble("VIRTUAL_UEYE_DAHENG_MIN_EXPOSURE_US", profileFloor));
+
+        return Math.Clamp(configuredFloor, deviceMinExposureUs, deviceMaxExposureUs);
+    }
+
+    private double ResolveEffectiveMinGainDb(double deviceMinGainDb, double deviceMaxGainDb)
+    {
+        if (!(deviceMaxGainDb > deviceMinGainDb))
+        {
+            return deviceMinGainDb;
+        }
+
+        var profileFloor = _activeCameraProfile?.MinimumOperationalGainDb ?? deviceMinGainDb;
+        var configuredFloor = GetEnvironmentDouble(
+            "BEAMMIC_DAHENG_MIN_GAIN_DB",
+            GetEnvironmentDouble("VIRTUAL_UEYE_DAHENG_MIN_GAIN_DB", profileFloor));
+
+        return Math.Clamp(configuredFloor, deviceMinGainDb, deviceMaxGainDb);
+    }
+
+    private FloatState ResolveReportedFrameRateState(IGXFeatureControl remote, FloatState rawState)
+    {
+        if (rawState.Max > 0.0 && rawState.Max >= rawState.Min)
+        {
+            return rawState;
+        }
+
+        if (!IsMer13030UmProfileActive())
+        {
+            return rawState;
+        }
+
+        var currentFrameRateHz = TryReadCurrentFrameRateHz(remote, out var currentValue) ? currentValue : 0.0;
+        var effectiveValue = rawState.Value > 0.0
+            ? rawState.Value
+            : (currentFrameRateHz > 0.0 ? currentFrameRateHz : Mer13030UmUsb2NominalFrameRateMaxHz);
+
+        return new FloatState(
+            Value: Math.Clamp(effectiveValue, Mer13030UmUsb2NominalFrameRateMinHz, Mer13030UmUsb2NominalFrameRateMaxHz),
+            Min: Mer13030UmUsb2NominalFrameRateMinHz,
+            Max: Mer13030UmUsb2NominalFrameRateMaxHz,
+            Increment: Mer13030UmUsb2NominalFrameRateIncHz);
+    }
+
+    private BridgeControlState ApplyCompatibleFrameRateOverride(BridgeControlState state, double? preferredFrameRateHz = null)
+    {
+        if (!IsMer13030UmProfileActive())
+        {
+            return state;
+        }
+
+        var minFrameRateHz = Mer13030UmUsb2NominalFrameRateMinHz;
+        var exposureLimitedFrameRateHz = state.ExposureUs > 0.0
+            ? 1_000_000.0 / state.ExposureUs
+            : Mer13030UmUsb2NominalFrameRateMaxHz;
+        var deviceReportedMaxFrameRateHz = state.FrameRateMaxHz > 0.0 ? state.FrameRateMaxHz : Mer13030UmUsb2NominalFrameRateMaxHz;
+        var maxFrameRateHz = Math.Min(deviceReportedMaxFrameRateHz, exposureLimitedFrameRateHz);
+        maxFrameRateHz = Math.Clamp(maxFrameRateHz, minFrameRateHz, Mer13030UmUsb2NominalFrameRateMaxHz);
+
+        var effectiveFrameRateHz = preferredFrameRateHz is > 0.0
+            ? preferredFrameRateHz.Value
+            : state.FrameRateHz > 0.0
+                ? state.FrameRateHz
+                : _activeCameraProfile?.DefaultFrameRateHz ?? DefaultStartupFrameRate;
+
+        effectiveFrameRateHz = Math.Clamp(effectiveFrameRateHz, minFrameRateHz, maxFrameRateHz);
+        var incrementFrameRateHz = state.FrameRateIncHz > 0.0 ? state.FrameRateIncHz : Mer13030UmUsb2NominalFrameRateIncHz;
+        incrementFrameRateHz = Math.Clamp(incrementFrameRateHz, 0.001, Mer13030UmUsb2NominalFrameRateIncHz);
+
+        return state with
+        {
+            FrameRateHz = effectiveFrameRateHz,
+            FrameRateMinHz = minFrameRateHz,
+            FrameRateMaxHz = maxFrameRateHz,
+            FrameRateIncHz = incrementFrameRateHz
+        };
+    }
+
+    private bool IsMer13030UmProfileActive()
+    {
+        return _activeCameraProfile is { ModelName: var modelName } &&
+               modelName.StartsWith(Mer13030UmUsb2ModelPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private static double TryGetFloatIncrement(object feature)
@@ -2785,6 +3111,80 @@ internal sealed class DahengFrameServerApp
     private readonly record struct CaptureSource(bool UseSimulation, string? Serial);
     private readonly record struct FloatState(double Value, double Min, double Max, double Increment);
     private readonly record struct BlackLevelState(bool IsImplemented, double Value, double Min, double Max, double Increment, int LogicalValue);
+    private readonly record struct CameraRuntimeProfile(
+        string VendorName,
+        string ModelName,
+        string Serial,
+        string DefaultPixelFormat,
+        int DefaultWidth,
+        int DefaultHeight,
+        bool DefaultReverseX,
+        bool DefaultReverseY,
+        double DefaultExposureUs,
+        double MinimumOperationalExposureUs,
+        double DefaultGainDb,
+        double DefaultFrameRateHz,
+        double MinimumOperationalGainDb)
+    {
+        public static CameraRuntimeProfile FromDeviceInfo(IGXDeviceInfo deviceInfo)
+        {
+            var vendorName = deviceInfo.GetVendorName() ?? string.Empty;
+            var modelName = deviceInfo.GetModelName() ?? string.Empty;
+            var serial = deviceInfo.GetSN() ?? string.Empty;
+
+            if (modelName.StartsWith(Mer13030UmUsb2ModelPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return new CameraRuntimeProfile(
+                    VendorName: vendorName,
+                    ModelName: modelName,
+                    Serial: serial,
+                    DefaultPixelFormat: "Mono10",
+                    DefaultWidth: 1280,
+                    DefaultHeight: 1024,
+                    DefaultReverseX: false,
+                    DefaultReverseY: false,
+                    DefaultExposureUs: 300000.0,
+                    MinimumOperationalExposureUs: Mer13030UmUsb2MinimumOperationalExposureUs,
+                    DefaultGainDb: 8.0,
+                    DefaultFrameRateHz: 0.0,
+                    MinimumOperationalGainDb: Mer13030UmUsb2MinimumOperationalGainDb);
+            }
+
+            return new CameraRuntimeProfile(
+                VendorName: vendorName,
+                ModelName: modelName,
+                Serial: serial,
+                DefaultPixelFormat: "AutoHighBit",
+                DefaultWidth: 0,
+                DefaultHeight: 0,
+                DefaultReverseX: DahengFrameServerApp.DefaultReverseX,
+                DefaultReverseY: DahengFrameServerApp.DefaultReverseY,
+                DefaultExposureUs: DefaultStartupExposureUs,
+                MinimumOperationalExposureUs: 0.0,
+                DefaultGainDb: DefaultStartupGainDb,
+                DefaultFrameRateHz: DefaultStartupFrameRate,
+                MinimumOperationalGainDb: 0.0);
+        }
+    }
+
+    private static bool IsTargetUsbDevice(IGXDeviceInfo deviceInfo, string? requestedSerial)
+    {
+        if (!IsUsbDevice(deviceInfo))
+        {
+            return false;
+        }
+
+        var serial = deviceInfo.GetSN() ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(requestedSerial) &&
+            !string.Equals(serial, requestedSerial, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var modelName = deviceInfo.GetModelName() ?? string.Empty;
+        return modelName.StartsWith(Mer13030UmUsb2ModelPrefix, StringComparison.OrdinalIgnoreCase);
+    }
+
     private enum SimulationPattern
     {
         BeamTarget,

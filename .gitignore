@@ -12,6 +12,17 @@ GxSimpleGrabPortable/
 logs/
 **/logs/
 *.log
+diagnostics/
+result_*.json
+result_*.txt
+result_*.control.json
+result_*.control.txt
+tmp_*.json
+tmp_*.txt
+tmp_*.control.json
+tmp_*.control.txt
+decrypt_window.control.json
+decrypt_window.control.txt
 
 # IDE and OS noise
 .vs/
@@ -25,3 +36,9 @@ Desktop.ini
 # Python cache
 __pycache__/
 *.pyc
+
+# Local packaged bundles and archives
+camera-switch-bundle*/
+rayci-permanent-compat-package/
+*.zip
+*.rar

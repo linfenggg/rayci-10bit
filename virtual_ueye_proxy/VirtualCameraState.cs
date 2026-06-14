@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
+using RayCiBridge;
 
 namespace VirtualUEyeProxy;
 
@@ -46,10 +48,6 @@ internal static unsafe class VirtualCameraState
     private const int ImageInfoOffsetFocusing = 88;
     private const int ImageInfoOffsetReserved4 = 92;
     private const uint CameraHandle = 1;
-    private const string IdentityStyleCaptured = "captured";
-    private const string IdentityStyleRegistry = "registry";
-    private const string ListSerialStyleCaptured = "captured";
-    private const string ListSerialStyleLicensed = "licensed";
     internal const string UeyeSerial = "4103791906";
     internal const string CapturedRawSerial = "1145655880";
     internal const string BoardSerial = CapturedCameraProfile.BoardSerial;
@@ -65,8 +63,12 @@ internal static unsafe class VirtualCameraState
     internal const string FullModel = RegistryModel;
     internal const string CalibrationName = "CinCam CMOS 1201 EL";
     internal const string LegacyCalibrationName = CapturedCameraProfile.ModelName;
+    private const double CompatibleFrameRateMinHz = 1.0;
+    private const double CompatibleFrameRateMaxHz = 30.0;
+    private const double CompatibleFrameRateIncHz = 0.1;
 
     private static readonly object Gate = new();
+    private static readonly double[] RayCiGainStepsDb = [0.0, 4.0, 8.0, 12.0, 16.0];
     private static readonly Dictionary<int, ImageMemory> Memories = new();
     private static readonly Dictionary<int, ulong> MemoryFrameNumbers = new();
     private static readonly Dictionary<int, ImageInfoSnapshot> MemoryImageInfoSnapshots = new();
@@ -80,13 +82,20 @@ internal static unsafe class VirtualCameraState
     private static readonly string LogDirectory = ResolveLogDirectory();
     private static readonly string LogPath = Path.Combine(LogDirectory, "ueye_proxy.log");
     private static readonly string IdentityReportPath = Path.Combine(LogDirectory, "bridge_identity_report.txt");
-    private static readonly string IdentityStyle = ResolveIdentityStyle();
-    private static readonly string ListSerialStyle = ResolveListSerialStyle();
+    private static int _bridgeMissTraceCount;
+
+    private enum FrameRateRequestEncoding
+    {
+        Hz,
+        RayCiMilliHz,
+        FrameIntervalSeconds,
+    }
 
     private static int _nextMemoryId = 1;
     private static int _activeMemoryId;
     private static int _displayMode = UeyeNative.IS_SET_DM_DIB;
     private static int _colorMode = UeyeNative.DefaultColorMode;
+    private static int _bridgeCapturePixelFormat = FrameBridgeProtocol.CapturePixelFormatMono10;
     private static int _triggerMode = UeyeNative.IS_SET_TRIGGER_OFF;
     private static int _pixelClock = UeyeNative.DefaultPixelClock;
     private static IS_RECT _aoi = new()
@@ -96,12 +105,17 @@ internal static unsafe class VirtualCameraState
         s32Width = UeyeNative.DefaultWidth,
         s32Height = UeyeNative.DefaultHeight,
     };
+    private static int _binningMode = UeyeNative.IS_BINNING_DISABLE;
+    private static int _subSamplingMode = UeyeNative.IS_SUBSAMPLING_DISABLE;
     private static double _exposureMs = UeyeNative.DefaultExposureMs;
     private static double _frameRate = UeyeNative.DefaultFps;
     private static bool _autoExposureEnabled;
     private static bool _autoGainEnabled;
     private static int _masterGain;
     private static bool _gainBoostEnabled;
+    private static int _blackLevel = 49;
+    private static int _bridgeSensorWidth = UeyeNative.DefaultWidth;
+    private static int _bridgeSensorHeight = UeyeNative.DefaultHeight;
     private static int _lastError = UeyeNative.IS_SUCCESS;
     private static string _lastErrorText = "OK";
     private static nint _lastErrorTextPtr = nint.Zero;
@@ -150,25 +164,13 @@ internal static unsafe class VirtualCameraState
 
     public static uint Handle => CameraHandle;
 
-    internal static string ReportedListModelShort =>
-        string.Equals(IdentityStyle, IdentityStyleRegistry, StringComparison.OrdinalIgnoreCase)
-            ? RegistryShortModel
-            : CapturedCameraProfile.ModelName;
+    internal static string ReportedListModelShort => RegistryShortModel;
 
-    internal static string ReportedListSerial =>
-        string.Equals(ListSerialStyle, ListSerialStyleLicensed, StringComparison.OrdinalIgnoreCase)
-            ? DisplaySerialShort
-            : CapturedRawSerial;
+    internal static string ReportedListSerial => DisplaySerialShort;
 
-    internal static string ReportedListModelFull =>
-        string.Equals(IdentityStyle, IdentityStyleRegistry, StringComparison.OrdinalIgnoreCase)
-            ? CalibrationName
-            : CapturedCameraProfile.ModelName;
+    internal static string ReportedListModelFull => CalibrationName;
 
-    internal static string ReportedCalibrationRegistryName =>
-        string.Equals(IdentityStyle, IdentityStyleRegistry, StringComparison.OrdinalIgnoreCase)
-            ? RegistryModel
-            : CapturedCameraProfile.ModelName;
+    internal static string ReportedCalibrationRegistryName => RegistryModel;
 
     public static void Log(string message)
     {
@@ -246,8 +248,8 @@ internal static unsafe class VirtualCameraState
                 $"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
                 string.Empty,
                 "[uEye API identity]",
-                $"IdentityStyle={IdentityStyle}",
-                $"ListSerialStyle={ListSerialStyle}",
+                "IdentityStyle=fixed-registry-shell",
+                "ListSerialStyle=fixed-display-serial",
                 $"UeyeSerial={UeyeSerial}",
                 $"CapturedRawSerial={CapturedRawSerial}",
                 $"BoardSerial={BoardSerial}",
@@ -339,6 +341,7 @@ internal static unsafe class VirtualCameraState
             }
 
             EnsureCaptureThreadLocked();
+            TrySyncControlStateFromBridgeLocked(out _);
         }
 
         Log("is_InitCamera -> handle=1");
@@ -436,8 +439,8 @@ internal static unsafe class VirtualCameraState
         info->dwInUse = 0;
         info->dwStatus = 0;
 
-        // Default to the conservative registry-facing shell. The raw c0 e1 page
-        // identity remains available via the explicit "captured" environment mode.
+        // RayCi always sees the fixed compatibility shell while the captured
+        // register/page data remains available for low-level emulation only.
         NativeHelpers.WriteAnsi(&info->SerNo[0], 16, ReportedListSerial);
         NativeHelpers.WriteAnsi(&info->Model[0], 16, ReportedListModelShort);
         NativeHelpers.WriteAnsi(&info->FullModelName[0], 32, ReportedListModelFull);
@@ -447,7 +450,7 @@ internal static unsafe class VirtualCameraState
             _cameraListTraceCount++;
             Log(
                 $"FillCameraList -> count=1, sensorId=0x{info->dwSensorID:X4}, " +
-                $"identityStyle={IdentityStyle}, listSerialStyle={ListSerialStyle}, reportedModel={ReportedListModelFull}, reportedSerial={ReportedListSerial}, displaySerial={DisplaySerial}, capturedModel={CapturedCameraProfile.ModelName}, capturedRawSerial={CapturedRawSerial}, boardModel={FullModel}, boardSerial={BoardSerial}");
+                $"reportedModel={ReportedListModelFull}, reportedSerial={ReportedListSerial}, displaySerial={DisplaySerial}, capturedModel={CapturedCameraProfile.ModelName}, capturedRawSerial={CapturedRawSerial}, boardModel={FullModel}, boardSerial={BoardSerial}");
         }
     }
 
@@ -514,10 +517,7 @@ internal static unsafe class VirtualCameraState
                 return SetLastError(UeyeNative.IS_SUCCESS, "OK");
 
             default:
-                if (parameter != null && parameterSize > 0)
-                {
-                    NativeHelpers.Zero(parameter, parameterSize);
-                }
+                ZeroCommand(parameter, parameterSize);
 
                 return SetLastError(UeyeNative.IS_SUCCESS, "OK");
         }
@@ -543,21 +543,31 @@ internal static unsafe class VirtualCameraState
                 return SetLastError(UeyeNative.IS_SUCCESS, "OK");
 
             default:
-                if (parameter != null && parameterSize > 0)
-                {
-                    NativeHelpers.Zero(parameter, parameterSize);
-                }
+                ZeroCommand(parameter, parameterSize);
 
                 return SetLastError(UeyeNative.IS_SUCCESS, "OK");
         }
+    }
+
+    public static int SetAoi(int x, int y, int width, int height)
+    {
+        lock (Gate)
+        {
+            _aoi = NormalizeAoi(x, y, width, height);
+            TryApplyGeometryToBridgeLocked("SetAoi");
+            Log($"SetAoi(x={_aoi.s32X}, y={_aoi.s32Y}, width={_aoi.s32Width}, height={_aoi.s32Height})");
+        }
+
+        return SetLastError(UeyeNative.IS_SUCCESS, "OK");
     }
 
     public static int SetAoiSize(int width, int height)
     {
         lock (Gate)
         {
-            _aoi.s32Width = Math.Clamp(width, 1, UeyeNative.DefaultWidth);
-            _aoi.s32Height = Math.Clamp(height, 1, UeyeNative.DefaultHeight);
+            _aoi = NormalizeAoi(_aoi.s32X, _aoi.s32Y, width, height);
+            TryApplyGeometryToBridgeLocked("SetAoiSize");
+            Log($"SetAoiSize(width={_aoi.s32Width}, height={_aoi.s32Height})");
         }
 
         return SetLastError(UeyeNative.IS_SUCCESS, "OK");
@@ -567,8 +577,9 @@ internal static unsafe class VirtualCameraState
     {
         lock (Gate)
         {
-            _aoi.s32X = Math.Clamp(x, 0, UeyeNative.DefaultWidth - _aoi.s32Width);
-            _aoi.s32Y = Math.Clamp(y, 0, UeyeNative.DefaultHeight - _aoi.s32Height);
+            _aoi = NormalizeAoi(x, y, _aoi.s32Width, _aoi.s32Height);
+            TryApplyGeometryToBridgeLocked("SetAoiPosition");
+            Log($"SetAoiPosition(x={_aoi.s32X}, y={_aoi.s32Y})");
         }
 
         return SetLastError(UeyeNative.IS_SUCCESS, "OK");
@@ -579,6 +590,134 @@ internal static unsafe class VirtualCameraState
         lock (Gate)
         {
             return _aoi;
+        }
+    }
+
+    public static int SetBinning(int mode)
+    {
+        lock (Gate)
+        {
+            TrySyncControlStateFromBridgeLocked(out _);
+            if (TryHandleSamplingQueryLocked(mode, isSubSampling: false, out var queryResult))
+            {
+                return queryResult;
+            }
+
+            if (!TryResolveSamplingMode(mode, isSubSampling: false, out var normalizedMode, out var factorX, out var factorY))
+            {
+                return SetLastError(UeyeNative.IS_INVALID_PARAMETER, $"Binning mode 0x{mode:X} is invalid.");
+            }
+
+            _binningMode = normalizedMode;
+            _subSamplingMode = UeyeNative.IS_SUBSAMPLING_DISABLE;
+            TryApplyGeometryToBridgeLocked("SetBinning");
+            Log($"SetBinning(mode=0x{mode:X}, normalized=0x{normalizedMode:X}, factor={factorX}x{factorY})");
+        }
+
+        return SetLastError(UeyeNative.IS_SUCCESS, "OK");
+    }
+
+    public static int SetSubSampling(int mode)
+    {
+        lock (Gate)
+        {
+            TrySyncControlStateFromBridgeLocked(out _);
+            if (TryHandleSamplingQueryLocked(mode, isSubSampling: true, out var queryResult))
+            {
+                return queryResult;
+            }
+
+            if (!TryResolveSamplingMode(mode, isSubSampling: true, out var normalizedMode, out var factorX, out var factorY))
+            {
+                return SetLastError(UeyeNative.IS_INVALID_PARAMETER, $"Subsampling mode 0x{mode:X} is invalid.");
+            }
+
+            _subSamplingMode = normalizedMode;
+            _binningMode = UeyeNative.IS_BINNING_DISABLE;
+            TryApplyGeometryToBridgeLocked("SetSubSampling");
+            Log($"SetSubSampling(mode=0x{mode:X}, normalized=0x{normalizedMode:X}, factor={factorX}x{factorY})");
+        }
+
+        return SetLastError(UeyeNative.IS_SUCCESS, "OK");
+    }
+
+    public static int Blacklevel(uint command, void* parameter, uint parameterSize)
+    {
+        lock (Gate)
+        {
+            TrySyncControlStateFromBridgeLocked(out _);
+
+            switch (command)
+            {
+                case UeyeNative.IS_BLACKLEVEL_CMD_GET_CAPS:
+                    if (parameter == null || parameterSize < sizeof(uint))
+                    {
+                        return SetLastError(UeyeNative.IS_INVALID_PARAMETER, "Blacklevel caps buffer is invalid.");
+                    }
+
+                    *(uint*)parameter = UeyeNative.IS_BLACKLEVEL_CAP_SET_AUTO_BLACKLEVEL | UeyeNative.IS_BLACKLEVEL_CAP_SET_OFFSET;
+                    return SetLastError(UeyeNative.IS_SUCCESS, "OK");
+
+                case UeyeNative.IS_BLACKLEVEL_CMD_GET_MODE_DEFAULT:
+                case UeyeNative.IS_BLACKLEVEL_CMD_GET_MODE:
+                    if (parameter == null || parameterSize < sizeof(int))
+                    {
+                        return SetLastError(UeyeNative.IS_INVALID_PARAMETER, "Blacklevel mode buffer is invalid.");
+                    }
+
+                    *(int*)parameter = UeyeNative.IS_AUTO_BLACKLEVEL_OFF;
+                    return SetLastError(UeyeNative.IS_SUCCESS, "OK");
+
+                case UeyeNative.IS_BLACKLEVEL_CMD_SET_MODE:
+                    if (parameter == null || parameterSize < sizeof(int))
+                    {
+                        return SetLastError(UeyeNative.IS_INVALID_PARAMETER, "Blacklevel mode input is invalid.");
+                    }
+
+                    Log($"Blacklevel mode request -> {*(int*)parameter} (kept manual)");
+                    *(int*)parameter = UeyeNative.IS_AUTO_BLACKLEVEL_OFF;
+                    return SetLastError(UeyeNative.IS_SUCCESS, "OK");
+
+                case UeyeNative.IS_BLACKLEVEL_CMD_GET_OFFSET_DEFAULT:
+                case UeyeNative.IS_BLACKLEVEL_CMD_GET_OFFSET:
+                    if (parameter == null || parameterSize < sizeof(int))
+                    {
+                        return SetLastError(UeyeNative.IS_INVALID_PARAMETER, "Blacklevel offset buffer is invalid.");
+                    }
+
+                    *(int*)parameter = _blackLevel;
+                    return SetLastError(UeyeNative.IS_SUCCESS, "OK");
+
+                case UeyeNative.IS_BLACKLEVEL_CMD_GET_OFFSET_RANGE:
+                    if (parameter == null || parameterSize < (sizeof(int) * 3))
+                    {
+                        return SetLastError(UeyeNative.IS_INVALID_PARAMETER, "Blacklevel range buffer is invalid.");
+                    }
+
+                    ((int*)parameter)[0] = 0;
+                    ((int*)parameter)[1] = 255;
+                    ((int*)parameter)[2] = 1;
+                    return SetLastError(UeyeNative.IS_SUCCESS, "OK");
+
+                case UeyeNative.IS_BLACKLEVEL_CMD_SET_OFFSET:
+                    if (parameter == null || parameterSize < sizeof(int))
+                    {
+                        return SetLastError(UeyeNative.IS_INVALID_PARAMETER, "Blacklevel offset input is invalid.");
+                    }
+
+                    _blackLevel = Math.Clamp(*(int*)parameter, 0, 255);
+                    if (DahengFrameBridgeClient.TrySetBlackLevel(_blackLevel, out var updatedState))
+                    {
+                        ApplyBridgeControlStateLocked(updatedState);
+                    }
+
+                    *(int*)parameter = _blackLevel;
+                    Log($"Blacklevel set -> {_blackLevel}");
+                    return SetLastError(UeyeNative.IS_SUCCESS, "OK");
+
+                default:
+                    return SetLastError(UeyeNative.IS_NOT_SUPPORTED, $"Blacklevel command {command} not supported.");
+            }
         }
     }
 
@@ -687,10 +826,7 @@ internal static unsafe class VirtualCameraState
 
                     return SetLastError(UeyeNative.IS_SUCCESS, "OK");
                 default:
-                    if (parameter != null && parameterSize > 0)
-                    {
-                        NativeHelpers.Zero(parameter, parameterSize);
-                    }
+                    ZeroCommand(parameter, parameterSize);
 
                     return SetLastError(UeyeNative.IS_SUCCESS, "OK");
             }
@@ -1550,34 +1686,55 @@ internal static unsafe class VirtualCameraState
     {
         lock (Gate)
         {
-            TrySyncControlStateFromBridgeLocked(out _);
+            TrySyncControlStateFromBridgeLocked(out var bridgeState);
+            var gainMinDb = bridgeState.GainMaxDb > bridgeState.GainMinDb
+                ? bridgeState.GainMinDb
+                : 0.0;
+            var gainMaxDb = bridgeState.GainMaxDb > bridgeState.GainMinDb
+                ? bridgeState.GainMaxDb
+                : 16.0;
 
             switch (mode)
             {
                 case UeyeNative.IS_GET_MASTER_GAIN_FACTOR:
+                {
+                    var currentFactor = ToGainFactor(_masterGain, gainMinDb, gainMaxDb);
+                    Log($"SetHWGainFactor(getMaster) -> {currentFactor}");
                     SetLastError(UeyeNative.IS_SUCCESS, "OK");
-                    return ToGainFactor(_masterGain);
+                    return currentFactor;
+                }
                 case UeyeNative.IS_GET_RED_GAIN_FACTOR:
                 case UeyeNative.IS_GET_GREEN_GAIN_FACTOR:
                 case UeyeNative.IS_GET_BLUE_GAIN_FACTOR:
+                    Log($"SetHWGainFactor(getColor mode=0x{mode:X}) -> 100");
                     SetLastError(UeyeNative.IS_SUCCESS, "OK");
                     return 100;
                 case UeyeNative.IS_GET_DEFAULT_MASTER_GAIN_FACTOR:
+                    Log("SetHWGainFactor(getDefaultMaster) -> 100");
+                    SetLastError(UeyeNative.IS_SUCCESS, "OK");
+                    return 100;
                 case UeyeNative.IS_GET_DEFAULT_RED_GAIN_FACTOR:
                 case UeyeNative.IS_GET_DEFAULT_GREEN_GAIN_FACTOR:
                 case UeyeNative.IS_GET_DEFAULT_BLUE_GAIN_FACTOR:
+                    Log($"SetHWGainFactor(getDefaultColor mode=0x{mode:X}) -> 100");
                     SetLastError(UeyeNative.IS_SUCCESS, "OK");
                     return 100;
                 case UeyeNative.IS_INQUIRE_MASTER_GAIN_FACTOR:
+                {
+                    var standardizedGain = Math.Clamp(factor, UeyeNative.IS_MIN_GAIN, UeyeNative.IS_MAX_GAIN);
+                    var inquiryFactor = ToGainFactor(standardizedGain, gainMinDb, gainMaxDb);
+                    Log($"SetHWGainFactor(inquireMaster standardized={factor}) -> {inquiryFactor}");
                     SetLastError(UeyeNative.IS_SUCCESS, "OK");
-                    return 1;
+                    return inquiryFactor;
+                }
                 case UeyeNative.IS_INQUIRE_RED_GAIN_FACTOR:
                 case UeyeNative.IS_INQUIRE_GREEN_GAIN_FACTOR:
                 case UeyeNative.IS_INQUIRE_BLUE_GAIN_FACTOR:
+                    Log($"SetHWGainFactor(inquireColor mode=0x{mode:X}, value={factor}) -> 0");
                     SetLastError(UeyeNative.IS_SUCCESS, "OK");
                     return 0;
                 case UeyeNative.IS_SET_MASTER_GAIN_FACTOR:
-                    _masterGain = FromGainFactor(factor);
+                    _masterGain = FromGainFactor(factor, gainMinDb, gainMaxDb);
                     if (DahengFrameBridgeClient.TrySetMasterGain(_masterGain, out var gainState))
                     {
                         ApplyBridgeControlStateLocked(gainState);
@@ -1599,18 +1756,56 @@ internal static unsafe class VirtualCameraState
     {
         lock (Gate)
         {
-            // The native USB camera path behaves as a fixed-rate stream. RayCi probes
-            // several fps values during LiveMode setup, but applying those probe values
-            // directly can starve the queue long enough for the app to mark the camera
-            // as removed.
-            _frameRate = UeyeNative.DefaultFps;
+            var hasBridgeState = TrySyncControlStateFromBridgeLocked(out var bridgeState);
+            ResolveCompatibleFrameRateRange(
+                hasBridgeState ? bridgeState : default,
+                out var minFrameRate,
+                out var maxFrameRate,
+                out _);
+            var currentFrameRate = _frameRate > 0.0
+                ? Math.Clamp(_frameRate, minFrameRate, maxFrameRate)
+                : Math.Clamp(UeyeNative.DefaultFps, minFrameRate, maxFrameRate);
+            var hasValidRequest = double.IsFinite(fps) && fps > 0.0;
+            var requestedFrameRate = currentFrameRate;
+            var ignoredOutOfRange = false;
+            var normalizedFromRayCiScale = false;
+            var normalizedFrameRate = fps;
+            var requestEncoding = FrameRateRequestEncoding.Hz;
+
+            if (hasValidRequest)
+            {
+                normalizedFrameRate = NormalizeFrameRateRequest(
+                    fps,
+                    minFrameRate,
+                    maxFrameRate,
+                    out requestEncoding);
+                normalizedFromRayCiScale = requestEncoding != FrameRateRequestEncoding.Hz;
+
+                if (normalizedFrameRate < minFrameRate || normalizedFrameRate > maxFrameRate)
+                {
+                    ignoredOutOfRange = true;
+                }
+                else
+                {
+                    requestedFrameRate = normalizedFrameRate;
+                }
+            }
+
+            if (DahengFrameBridgeClient.TrySetFrameRate(requestedFrameRate, out var updatedState))
+            {
+                ApplyBridgeControlStateLocked(updatedState);
+            }
+            else
+            {
+                _frameRate = requestedFrameRate;
+            }
 
             if (newFps != null)
             {
-                *newFps = _frameRate;
+                *newFps = EncodeFrameRateResponse(_frameRate, requestEncoding);
             }
 
-            Log($"SetFrameRate(requested={fps:F3}, applied={_frameRate:F3})");
+            Log($"SetFrameRate(requested={fps:F3}, normalized={normalizedFrameRate:F3}, effective={requestedFrameRate:F3}, applied={_frameRate:F3}, returned={(newFps != null ? (*newFps).ToString("F3", CultureInfo.InvariantCulture) : "<null>")}, encoding={requestEncoding}, rayciScale={normalizedFromRayCiScale}, ignoredOutOfRange={ignoredOutOfRange})");
         }
 
         return SetLastError(UeyeNative.IS_SUCCESS, "OK");
@@ -1618,10 +1813,35 @@ internal static unsafe class VirtualCameraState
 
     public static int GetFrameTimeRange(double* min, double* max, double* interval)
     {
-        var fixedFrameTimeMs = 1000.0 / UeyeNative.DefaultFps;
-        if (min != null) *min = fixedFrameTimeMs;
-        if (max != null) *max = fixedFrameTimeMs;
-        if (interval != null) *interval = fixedFrameTimeMs;
+        lock (Gate)
+        {
+            TrySyncControlStateFromBridgeLocked(out var bridgeState);
+            ResolveCompatibleFrameRateRange(bridgeState, out var minFps, out var maxFps, out var incFps);
+            var currentFps = _frameRate > 0
+                ? Math.Clamp(_frameRate, minFps, maxFps)
+                : Math.Clamp(UeyeNative.DefaultFps, minFps, maxFps);
+
+            if (min != null)
+            {
+                *min = 1.0 / maxFps;
+            }
+
+            if (max != null)
+            {
+                *max = 1.0 / minFps;
+            }
+
+            if (interval != null)
+            {
+                var nextFps = Math.Clamp(currentFps + incFps, minFps, maxFps);
+                *interval = nextFps > currentFps
+                    ? Math.Abs((1.0 / currentFps) - (1.0 / nextFps))
+                    : 0.0;
+            }
+
+            Log($"GetFrameTimeRange(min={1.0 / maxFps:F6}s, max={1.0 / minFps:F6}s, fpsRange={minFps:F3}..{maxFps:F3}, current={currentFps:F3})");
+        }
+
         return SetLastError(UeyeNative.IS_SUCCESS, "OK");
     }
 
@@ -1631,6 +1851,7 @@ internal static unsafe class VirtualCameraState
         {
             lock (Gate)
             {
+                TrySyncControlStateFromBridgeLocked(out _);
                 *fps = _frameRate;
             }
         }
@@ -1813,17 +2034,19 @@ internal static unsafe class VirtualCameraState
     public static int GetColorModeOrBits(int request)
     {
         int value;
+        int storedColorMode;
         lock (Gate)
         {
+            storedColorMode = _colorMode;
             value = request == UeyeNative.IS_GET_BITS_PER_PIXEL
-                ? ResolveBitsPerPixelLocked()
-                : _colorMode;
+                ? ResolveReportedBitsPerPixelLocked()
+                : storedColorMode;
         }
 
         if (_displayTraceCount < 32)
         {
             _displayTraceCount++;
-            Log($"GetColorModeOrBits(request=0x{request:X}) -> {value}");
+            Log($"GetColorModeOrBits(request=0x{request:X}) -> {value} (storedColorMode=0x{storedColorMode:X})");
         }
 
         return value;
@@ -1831,15 +2054,17 @@ internal static unsafe class VirtualCameraState
 
     public static int SetColorMode(int mode)
     {
+        int normalizedMode;
         lock (Gate)
         {
-            _colorMode = mode;
+            normalizedMode = NormalizeReportedColorMode(mode);
+            _colorMode = normalizedMode;
         }
 
         if (_displayTraceCount < 32)
         {
             _displayTraceCount++;
-            Log($"SetColorMode(mode=0x{mode:X})");
+            Log($"SetColorMode(mode=0x{mode:X}) -> storedColorMode=0x{normalizedMode:X}");
         }
 
         return SetLastError(UeyeNative.IS_SUCCESS, "OK");
@@ -1890,6 +2115,19 @@ internal static unsafe class VirtualCameraState
 
     public static int ZeroCommand(void* parameter, uint parameterSize)
     {
+        const uint maxSafeZeroSize = 4096;
+
+        if (parameter == null || parameterSize == 0)
+        {
+            return SetLastError(UeyeNative.IS_SUCCESS, "OK");
+        }
+
+        if (parameterSize > maxSafeZeroSize)
+        {
+            Log($"ZeroCommand skipped oversized buffer size={parameterSize}");
+            return SetLastError(UeyeNative.IS_SUCCESS, "OK");
+        }
+
         NativeHelpers.Zero(parameter, parameterSize);
         return SetLastError(UeyeNative.IS_SUCCESS, "OK");
     }
@@ -1903,38 +2141,6 @@ internal static unsafe class VirtualCameraState
         }
 
         return Path.Combine(localAppData, "Ultron", "RayCiUeyeBridge", "logs");
-    }
-
-    private static string ResolveIdentityStyle()
-    {
-        var value = Environment.GetEnvironmentVariable("ULTRON_RAYCI_IDENTITY_STYLE");
-        if (string.Equals(value, IdentityStyleCaptured, StringComparison.OrdinalIgnoreCase))
-        {
-            return IdentityStyleCaptured;
-        }
-
-        if (string.Equals(value, IdentityStyleRegistry, StringComparison.OrdinalIgnoreCase))
-        {
-            return IdentityStyleRegistry;
-        }
-
-        return IdentityStyleRegistry;
-    }
-
-    private static string ResolveListSerialStyle()
-    {
-        var value = Environment.GetEnvironmentVariable("ULTRON_RAYCI_LIST_SERIAL_STYLE");
-        if (string.Equals(value, ListSerialStyleCaptured, StringComparison.OrdinalIgnoreCase))
-        {
-            return ListSerialStyleCaptured;
-        }
-
-        if (string.Equals(value, ListSerialStyleLicensed, StringComparison.OrdinalIgnoreCase))
-        {
-            return ListSerialStyleLicensed;
-        }
-
-        return ListSerialStyleLicensed;
     }
 
     private static void ResetRegisters()
@@ -2046,20 +2252,36 @@ internal static unsafe class VirtualCameraState
 
             return;
         }
-
-        FillNoiseLocked(memory);
-
-        if (_frameNumber == 0)
+        var hasPriorFrame = MemoryFrameNumbers.TryGetValue(memory.MemoryId, out var priorFrameNumber) && priorFrameNumber > 0;
+        if (!hasPriorFrame && _frameNumber > 0)
         {
+            priorFrameNumber = _frameNumber;
+            hasPriorFrame = true;
+        }
+
+        if (!hasPriorFrame)
+        {
+            FillNoiseLocked(memory);
             _frameNumber = 1;
+            MemoryFrameNumbers[memory.MemoryId] = _frameNumber;
+            MemoryImageInfoSnapshots[memory.MemoryId] = CreateImageInfoSnapshotLocked(_frameNumber);
+            if (_bridgeMissTraceCount < 64)
+            {
+                _bridgeMissTraceCount++;
+                Log($"bridge frame unavailable with no prior frame; seeded noise once for memoryId={memory.MemoryId}");
+            }
         }
-        else if (updateGeneration)
+        else
         {
-            _frameNumber++;
+            _frameNumber = updateGeneration ? Math.Max(_frameNumber + 1, priorFrameNumber) : Math.Max(_frameNumber, priorFrameNumber);
+            MemoryFrameNumbers[memory.MemoryId] = _frameNumber;
+            MemoryImageInfoSnapshots[memory.MemoryId] = CreateImageInfoSnapshotLocked(_frameNumber);
+            if (_bridgeMissTraceCount < 64)
+            {
+                _bridgeMissTraceCount++;
+                Log($"bridge frame unavailable; reusing prior image buffer for memoryId={memory.MemoryId}, frame={priorFrameNumber}");
+            }
         }
-
-        MemoryFrameNumbers[memory.MemoryId] = _frameNumber;
-        MemoryImageInfoSnapshots[memory.MemoryId] = CreateImageInfoSnapshotLocked(_frameNumber);
 
         if (updateGeneration)
         {
@@ -2353,6 +2575,12 @@ internal static unsafe class VirtualCameraState
 
     private static int ResolveBitsPerPixelLocked()
     {
+        var bridgeBits = ResolveBridgeSignalBitsPerPixelLocked();
+        if (bridgeBits > 0)
+        {
+            return bridgeBits;
+        }
+
         var normalizedMode = _colorMode & UeyeNative.IS_CM_MODE_MASK;
         return normalizedMode switch
         {
@@ -2363,6 +2591,36 @@ internal static unsafe class VirtualCameraState
             UeyeNative.IS_CM_MONO16 => 16,
             _ when _activeMemoryId != 0 && Memories.TryGetValue(_activeMemoryId, out var memory) && memory.BitsPerPixel > 0 => memory.BitsPerPixel,
             _ => UeyeNative.DefaultBitsPerPixel,
+        };
+    }
+
+    private static int NormalizeReportedColorMode(int requestedMode)
+    {
+        var bridgeColorMode = ResolveBridgeReportedColorModeLocked();
+        if (bridgeColorMode != 0)
+        {
+            return bridgeColorMode;
+        }
+
+        var normalizedMode = requestedMode & UeyeNative.IS_CM_MODE_MASK;
+        return normalizedMode switch
+        {
+            UeyeNative.IS_CM_MONO8 => UeyeNative.IS_CM_MONO10_COMPAT_Y16,
+            UeyeNative.IS_CM_MONO10 => UeyeNative.IS_CM_MONO10_COMPAT_Y16,
+            UeyeNative.IS_CM_SENSOR_RAW10 => UeyeNative.IS_CM_MONO10_COMPAT_Y16,
+            UeyeNative.IS_CM_MONO12 => UeyeNative.IS_CM_MONO10_COMPAT_Y16,
+            UeyeNative.IS_CM_MONO16 => UeyeNative.IS_CM_MONO10_COMPAT_Y16,
+            _ => requestedMode,
+        };
+    }
+
+    private static int ResolveReportedBitsPerPixelLocked()
+    {
+        var resolvedBits = ResolveBitsPerPixelLocked();
+        return resolvedBits switch
+        {
+            > 0 and < 16 => resolvedBits,
+            _ => UeyeNative.DefaultSignalBitsPerPixel,
         };
     }
 
@@ -2381,6 +2639,32 @@ internal static unsafe class VirtualCameraState
         // RayCi 2022's 10bpp path expects a Y16-style transport container even when
         // the app probes with 8/10/12-bit requests during compatibility fallback.
         return UeyeNative.GetBytesPerPixel(requestedBitsPerPixel) >= 1 ? 16 : requestedBitsPerPixel;
+    }
+
+    private static int ResolveBridgeSignalBitsPerPixelLocked()
+    {
+        return _bridgeCapturePixelFormat switch
+        {
+            FrameBridgeProtocol.CapturePixelFormatMono8 => 8,
+            FrameBridgeProtocol.CapturePixelFormatMono10 => 10,
+            FrameBridgeProtocol.CapturePixelFormatMono12 => 12,
+            FrameBridgeProtocol.CapturePixelFormatMono14 => 14,
+            FrameBridgeProtocol.CapturePixelFormatMono16 => 16,
+            _ => 0
+        };
+    }
+
+    private static int ResolveBridgeReportedColorModeLocked()
+    {
+        return _bridgeCapturePixelFormat switch
+        {
+            FrameBridgeProtocol.CapturePixelFormatMono8 => UeyeNative.IS_CM_MONO8,
+            FrameBridgeProtocol.CapturePixelFormatMono10 => UeyeNative.IS_CM_MONO10_COMPAT_Y16,
+            FrameBridgeProtocol.CapturePixelFormatMono12 => UeyeNative.IS_CM_MONO10_COMPAT_Y16,
+            FrameBridgeProtocol.CapturePixelFormatMono14 => UeyeNative.IS_CM_MONO10_COMPAT_Y16,
+            FrameBridgeProtocol.CapturePixelFormatMono16 => UeyeNative.IS_CM_MONO10_COMPAT_Y16,
+            _ => 0
+        };
     }
 
     public static int GetMemoryImageCount()
@@ -2415,16 +2699,242 @@ internal static unsafe class VirtualCameraState
                 ? memory.BitsPerPixel
                 : UeyeNative.DefaultSignalBitsPerPixel;
             var maxValueExclusive = 1 << Math.Clamp(signalBits, 1, 15);
-            var shift = Math.Max(0, 16 - Math.Clamp(signalBits, 1, 15));
             for (var i = 0; i < pixels.Length; i++)
             {
-                pixels[i] = (ushort)(Random.Shared.Next(0, maxValueExclusive) << shift);
+                pixels[i] = (ushort)Random.Shared.Next(0, maxValueExclusive);
             }
 
             return;
         }
 
         Random.Shared.NextBytes(span);
+    }
+
+    private static IS_RECT NormalizeAoi(int x, int y, int width, int height)
+    {
+        var clampedWidth = Math.Clamp(width, 1, UeyeNative.DefaultWidth);
+        var clampedHeight = Math.Clamp(height, 1, UeyeNative.DefaultHeight);
+        return new IS_RECT
+        {
+            s32Width = clampedWidth,
+            s32Height = clampedHeight,
+            s32X = Math.Clamp(x, 0, UeyeNative.DefaultWidth - clampedWidth),
+            s32Y = Math.Clamp(y, 0, UeyeNative.DefaultHeight - clampedHeight),
+        };
+    }
+
+    private static bool TryHandleSamplingQueryLocked(int mode, bool isSubSampling, out int result)
+    {
+        var currentMode = isSubSampling
+            ? _subSamplingMode
+            : _binningMode;
+        var supportedModes = isSubSampling
+            ? UeyeNative.IS_SUBSAMPLING_MASK_HORIZONTAL | UeyeNative.IS_SUBSAMPLING_MASK_VERTICAL
+            : UeyeNative.IS_BINNING_MASK_HORIZONTAL | UeyeNative.IS_BINNING_MASK_VERTICAL;
+        var samplingType = isSubSampling
+            ? UeyeNative.IS_SUBSAMPLING_MONO
+            : UeyeNative.IS_BINNING_MONO;
+
+        if (mode == (isSubSampling ? UeyeNative.IS_GET_SUBSAMPLING : UeyeNative.IS_GET_BINNING))
+        {
+            result = currentMode;
+            SetLastError(UeyeNative.IS_SUCCESS, "OK");
+            return true;
+        }
+
+        if (mode == (isSubSampling ? UeyeNative.IS_GET_SUPPORTED_SUBSAMPLING : UeyeNative.IS_GET_SUPPORTED_BINNING))
+        {
+            result = supportedModes;
+            SetLastError(UeyeNative.IS_SUCCESS, "OK");
+            return true;
+        }
+
+        if (mode == (isSubSampling ? UeyeNative.IS_GET_SUBSAMPLING_TYPE : UeyeNative.IS_GET_BINNING_TYPE))
+        {
+            result = samplingType;
+            SetLastError(UeyeNative.IS_SUCCESS, "OK");
+            return true;
+        }
+
+        if (mode == (isSubSampling ? UeyeNative.IS_GET_SUBSAMPLING_FACTOR_HORIZONTAL : UeyeNative.IS_GET_BINNING_FACTOR_HORIZONTAL))
+        {
+            result = GetSamplingFactor(currentMode, isSubSampling, horizontal: true);
+            SetLastError(UeyeNative.IS_SUCCESS, "OK");
+            return true;
+        }
+
+        if (mode == (isSubSampling ? UeyeNative.IS_GET_SUBSAMPLING_FACTOR_VERTICAL : UeyeNative.IS_GET_BINNING_FACTOR_VERTICAL))
+        {
+            result = GetSamplingFactor(currentMode, isSubSampling, horizontal: false);
+            SetLastError(UeyeNative.IS_SUCCESS, "OK");
+            return true;
+        }
+
+        result = 0;
+        return false;
+    }
+
+    private static bool TryResolveSamplingMode(int mode, bool isSubSampling, out int normalizedMode, out int factorX, out int factorY)
+    {
+        normalizedMode = 0;
+        factorX = 1;
+        factorY = 1;
+
+        if (mode == (isSubSampling ? UeyeNative.IS_SUBSAMPLING_DISABLE : UeyeNative.IS_BINNING_DISABLE))
+        {
+            return true;
+        }
+
+        if ((mode & unchecked((int)0x8000)) != 0)
+        {
+            return false;
+        }
+
+        factorX = ResolveSamplingAxisFactor(mode, isSubSampling, horizontal: true, out var horizontalMask);
+        factorY = ResolveSamplingAxisFactor(mode, isSubSampling, horizontal: false, out var verticalMask);
+
+        if (factorX == 0 || factorY == 0)
+        {
+            return false;
+        }
+
+        normalizedMode = horizontalMask | verticalMask;
+        return true;
+    }
+
+    private static int ResolveSamplingAxisFactor(int mode, bool isSubSampling, bool horizontal, out int normalizedMask)
+    {
+        normalizedMask = 0;
+        var factorBits = horizontal
+            ? (isSubSampling
+                ? new (int Factor, int Flag)[]
+                {
+                    (2, UeyeNative.IS_SUBSAMPLING_2X_HORIZONTAL),
+                    (3, UeyeNative.IS_SUBSAMPLING_3X_HORIZONTAL),
+                    (4, UeyeNative.IS_SUBSAMPLING_4X_HORIZONTAL),
+                    (5, UeyeNative.IS_SUBSAMPLING_5X_HORIZONTAL),
+                    (6, UeyeNative.IS_SUBSAMPLING_6X_HORIZONTAL),
+                    (8, UeyeNative.IS_SUBSAMPLING_8X_HORIZONTAL),
+                    (16, UeyeNative.IS_SUBSAMPLING_16X_HORIZONTAL),
+                }
+                : new (int Factor, int Flag)[]
+                {
+                    (2, UeyeNative.IS_BINNING_2X_HORIZONTAL),
+                    (3, UeyeNative.IS_BINNING_3X_HORIZONTAL),
+                    (4, UeyeNative.IS_BINNING_4X_HORIZONTAL),
+                    (5, UeyeNative.IS_BINNING_5X_HORIZONTAL),
+                    (6, UeyeNative.IS_BINNING_6X_HORIZONTAL),
+                    (8, UeyeNative.IS_BINNING_8X_HORIZONTAL),
+                    (16, UeyeNative.IS_BINNING_16X_HORIZONTAL),
+                })
+            : (isSubSampling
+                ? new (int Factor, int Flag)[]
+                {
+                    (2, UeyeNative.IS_SUBSAMPLING_2X_VERTICAL),
+                    (3, UeyeNative.IS_SUBSAMPLING_3X_VERTICAL),
+                    (4, UeyeNative.IS_SUBSAMPLING_4X_VERTICAL),
+                    (5, UeyeNative.IS_SUBSAMPLING_5X_VERTICAL),
+                    (6, UeyeNative.IS_SUBSAMPLING_6X_VERTICAL),
+                    (8, UeyeNative.IS_SUBSAMPLING_8X_VERTICAL),
+                    (16, UeyeNative.IS_SUBSAMPLING_16X_VERTICAL),
+                }
+                : new (int Factor, int Flag)[]
+                {
+                    (2, UeyeNative.IS_BINNING_2X_VERTICAL),
+                    (3, UeyeNative.IS_BINNING_3X_VERTICAL),
+                    (4, UeyeNative.IS_BINNING_4X_VERTICAL),
+                    (5, UeyeNative.IS_BINNING_5X_VERTICAL),
+                    (6, UeyeNative.IS_BINNING_6X_VERTICAL),
+                    (8, UeyeNative.IS_BINNING_8X_VERTICAL),
+                    (16, UeyeNative.IS_BINNING_16X_VERTICAL),
+                });
+
+        var factor = 1;
+        foreach (var (candidateFactor, candidateFlag) in factorBits)
+        {
+            if ((mode & candidateFlag) == 0)
+            {
+                continue;
+            }
+
+            if (normalizedMask != 0)
+            {
+                normalizedMask = 0;
+                return 0;
+            }
+
+            normalizedMask = candidateFlag;
+            factor = candidateFactor;
+        }
+
+        return factor;
+    }
+
+    private static int GetSamplingFactor(int mode, bool isSubSampling, bool horizontal)
+    {
+        return ResolveSamplingAxisFactor(mode, isSubSampling, horizontal, out _) switch
+        {
+            > 0 => ResolveSamplingAxisFactor(mode, isSubSampling, horizontal, out _),
+            _ => 1
+        };
+    }
+
+    private static (int FactorX, int FactorY) GetRequestedSamplingFactorsLocked()
+    {
+        if (_subSamplingMode != UeyeNative.IS_SUBSAMPLING_DISABLE)
+        {
+            return (
+                GetSamplingFactor(_subSamplingMode, isSubSampling: true, horizontal: true),
+                GetSamplingFactor(_subSamplingMode, isSubSampling: true, horizontal: false));
+        }
+
+        return (
+            GetSamplingFactor(_binningMode, isSubSampling: false, horizontal: true),
+            GetSamplingFactor(_binningMode, isSubSampling: false, horizontal: false));
+    }
+
+    private static bool TryApplyGeometryToBridgeLocked(string source)
+    {
+        var bridgeSensorWidth = Math.Max(1, _bridgeSensorWidth);
+        var bridgeSensorHeight = Math.Max(1, _bridgeSensorHeight);
+        var requestedWidth = ScaleLocalLengthToBridge(_aoi.s32Width, UeyeNative.DefaultWidth, bridgeSensorWidth);
+        var requestedHeight = ScaleLocalLengthToBridge(_aoi.s32Height, UeyeNative.DefaultHeight, bridgeSensorHeight);
+        var requestedOffsetX = ScaleLocalOffsetToBridge(_aoi.s32X, _aoi.s32Width, UeyeNative.DefaultWidth, bridgeSensorWidth);
+        var requestedOffsetY = ScaleLocalOffsetToBridge(_aoi.s32Y, _aoi.s32Height, UeyeNative.DefaultHeight, bridgeSensorHeight);
+        var (factorX, factorY) = GetRequestedSamplingFactorsLocked();
+
+        if (!DahengFrameBridgeClient.TrySetGeometry(requestedWidth, requestedHeight, requestedOffsetX, requestedOffsetY, factorX, factorY, out var state))
+        {
+            Log($"{source} geometry bridge update pending local={_aoi.s32Width}x{_aoi.s32Height}@{_aoi.s32X},{_aoi.s32Y} bridge={requestedWidth}x{requestedHeight}@{requestedOffsetX},{requestedOffsetY} sampling={factorX}x{factorY}");
+            return false;
+        }
+
+        ApplyBridgeControlStateLocked(state);
+        Log($"{source} geometry bridged local={_aoi.s32Width}x{_aoi.s32Height}@{_aoi.s32X},{_aoi.s32Y} bridge={requestedWidth}x{requestedHeight}@{requestedOffsetX},{requestedOffsetY} sampling={factorX}x{factorY}");
+        return true;
+    }
+
+    private static int ScaleLocalLengthToBridge(int localLength, int localMax, int bridgeMax)
+    {
+        if (localLength >= localMax)
+        {
+            return bridgeMax;
+        }
+
+        return Math.Clamp((int)Math.Round(localLength * (bridgeMax / (double)localMax)), 1, bridgeMax);
+    }
+
+    private static int ScaleLocalOffsetToBridge(int localOffset, int localLength, int localMax, int bridgeMax)
+    {
+        if (localOffset <= 0 || localLength >= localMax)
+        {
+            return 0;
+        }
+
+        var bridgeLength = ScaleLocalLengthToBridge(localLength, localMax, bridgeMax);
+        var localSpan = Math.Max(1, localMax - localLength);
+        var bridgeSpan = Math.Max(0, bridgeMax - bridgeLength);
+        return Math.Clamp((int)Math.Round(localOffset * (bridgeSpan / (double)localSpan)), 0, bridgeSpan);
     }
 
     private static bool TrySyncControlStateFromBridgeLocked(out BridgeControlState state)
@@ -2454,13 +2964,215 @@ internal static unsafe class VirtualCameraState
         _autoGainEnabled = state.AutoGainEnabled;
         _masterGain = Math.Clamp(state.MasterGain, UeyeNative.IS_MIN_GAIN, UeyeNative.IS_MAX_GAIN);
         _gainBoostEnabled = state.GainBoostSupported && state.GainBoostEnabled;
+        _blackLevel = Math.Clamp(state.BlackLevel, 0, 255);
+        if (state.CapturePixelFormat > 0)
+        {
+            _bridgeCapturePixelFormat = state.CapturePixelFormat;
+            _colorMode = ResolveBridgeReportedColorModeLocked();
+        }
+
+        if (state.Width > 0)
+        {
+            _bridgeSensorWidth = Math.Max(_bridgeSensorWidth, state.Width);
+        }
+
+        if (state.Height > 0)
+        {
+            _bridgeSensorHeight = Math.Max(_bridgeSensorHeight, state.Height);
+        }
+
+        if (_binningMode == UeyeNative.IS_BINNING_DISABLE &&
+            _subSamplingMode == UeyeNative.IS_SUBSAMPLING_DISABLE &&
+            (state.BinningX > 1 || state.BinningY > 1))
+        {
+            _binningMode = ComposeSamplingMode(state.BinningX, state.BinningY, isSubSampling: false);
+        }
+
         SetCapturedExposureRegisterLocked(_exposureMs);
         SetCapturedGainRegisterLocked(state.GainDb);
     }
 
-    private static int ToGainFactor(int masterGain) => 100 + Math.Clamp(masterGain, UeyeNative.IS_MIN_GAIN, UeyeNative.IS_MAX_GAIN);
+    private static void ResolveCompatibleFrameRateRange(
+        BridgeControlState state,
+        out double minFrameRateHz,
+        out double maxFrameRateHz,
+        out double incrementFrameRateHz)
+    {
+        minFrameRateHz = state.FrameRateMinHz > 0.0 ? state.FrameRateMinHz : CompatibleFrameRateMinHz;
+        maxFrameRateHz = state.FrameRateMaxHz >= minFrameRateHz ? state.FrameRateMaxHz : CompatibleFrameRateMaxHz;
+        incrementFrameRateHz = state.FrameRateIncHz > 0.0 ? state.FrameRateIncHz : CompatibleFrameRateIncHz;
 
-    private static int FromGainFactor(int factor) => Math.Clamp(factor - 100, UeyeNative.IS_MIN_GAIN, UeyeNative.IS_MAX_GAIN);
+        if (maxFrameRateHz <= 0.0 || maxFrameRateHz < minFrameRateHz)
+        {
+            minFrameRateHz = CompatibleFrameRateMinHz;
+            maxFrameRateHz = CompatibleFrameRateMaxHz;
+            incrementFrameRateHz = CompatibleFrameRateIncHz;
+            return;
+        }
+
+        minFrameRateHz = Math.Clamp(minFrameRateHz, CompatibleFrameRateMinHz, CompatibleFrameRateMaxHz);
+        maxFrameRateHz = Math.Clamp(maxFrameRateHz, minFrameRateHz, CompatibleFrameRateMaxHz);
+        incrementFrameRateHz = Math.Clamp(incrementFrameRateHz, 0.001, CompatibleFrameRateIncHz);
+    }
+
+    private static double NormalizeFrameRateRequest(
+        double requestedFrameRate,
+        double minFrameRateHz,
+        double maxFrameRateHz,
+        out FrameRateRequestEncoding requestEncoding)
+    {
+        requestEncoding = FrameRateRequestEncoding.Hz;
+
+        if (!double.IsFinite(requestedFrameRate) || requestedFrameRate <= 0.0)
+        {
+            return requestedFrameRate;
+        }
+
+        if (requestedFrameRate >= minFrameRateHz && requestedFrameRate <= maxFrameRateHz)
+        {
+            return requestedFrameRate;
+        }
+
+        // RayCi's Control tab sends frame-rate slider values scaled by 1/1000
+        // (for example 0.030 for 30 fps), while the uEye API expects Hz.
+        if (requestedFrameRate < minFrameRateHz)
+        {
+            var scaledFrameRate = requestedFrameRate * 1000.0;
+            if (scaledFrameRate >= minFrameRateHz && scaledFrameRate <= maxFrameRateHz)
+            {
+                requestEncoding = FrameRateRequestEncoding.RayCiMilliHz;
+                return scaledFrameRate;
+            }
+
+            var frameIntervalFrameRate = 1.0 / requestedFrameRate;
+            if (frameIntervalFrameRate >= minFrameRateHz && frameIntervalFrameRate <= maxFrameRateHz)
+            {
+                requestEncoding = FrameRateRequestEncoding.FrameIntervalSeconds;
+                return frameIntervalFrameRate;
+            }
+        }
+
+        return requestedFrameRate;
+    }
+
+    private static double EncodeFrameRateResponse(double frameRateHz, FrameRateRequestEncoding requestEncoding)
+    {
+        return requestEncoding switch
+        {
+            FrameRateRequestEncoding.RayCiMilliHz => frameRateHz / 1000.0,
+            FrameRateRequestEncoding.FrameIntervalSeconds => frameRateHz > 0.0 ? 1.0 / frameRateHz : 0.0,
+            _ => frameRateHz,
+        };
+    }
+
+    private static int ComposeSamplingMode(int factorX, int factorY, bool isSubSampling)
+    {
+        return ComposeSamplingAxisMode(Math.Max(1, factorX), isSubSampling, horizontal: true) |
+               ComposeSamplingAxisMode(Math.Max(1, factorY), isSubSampling, horizontal: false);
+    }
+
+    private static int ComposeSamplingAxisMode(int factor, bool isSubSampling, bool horizontal)
+    {
+        return (factor, isSubSampling, horizontal) switch
+        {
+            (2, true, true) => UeyeNative.IS_SUBSAMPLING_2X_HORIZONTAL,
+            (3, true, true) => UeyeNative.IS_SUBSAMPLING_3X_HORIZONTAL,
+            (4, true, true) => UeyeNative.IS_SUBSAMPLING_4X_HORIZONTAL,
+            (5, true, true) => UeyeNative.IS_SUBSAMPLING_5X_HORIZONTAL,
+            (6, true, true) => UeyeNative.IS_SUBSAMPLING_6X_HORIZONTAL,
+            (8, true, true) => UeyeNative.IS_SUBSAMPLING_8X_HORIZONTAL,
+            (16, true, true) => UeyeNative.IS_SUBSAMPLING_16X_HORIZONTAL,
+            (2, true, false) => UeyeNative.IS_SUBSAMPLING_2X_VERTICAL,
+            (3, true, false) => UeyeNative.IS_SUBSAMPLING_3X_VERTICAL,
+            (4, true, false) => UeyeNative.IS_SUBSAMPLING_4X_VERTICAL,
+            (5, true, false) => UeyeNative.IS_SUBSAMPLING_5X_VERTICAL,
+            (6, true, false) => UeyeNative.IS_SUBSAMPLING_6X_VERTICAL,
+            (8, true, false) => UeyeNative.IS_SUBSAMPLING_8X_VERTICAL,
+            (16, true, false) => UeyeNative.IS_SUBSAMPLING_16X_VERTICAL,
+            (2, false, true) => UeyeNative.IS_BINNING_2X_HORIZONTAL,
+            (3, false, true) => UeyeNative.IS_BINNING_3X_HORIZONTAL,
+            (4, false, true) => UeyeNative.IS_BINNING_4X_HORIZONTAL,
+            (5, false, true) => UeyeNative.IS_BINNING_5X_HORIZONTAL,
+            (6, false, true) => UeyeNative.IS_BINNING_6X_HORIZONTAL,
+            (8, false, true) => UeyeNative.IS_BINNING_8X_HORIZONTAL,
+            (16, false, true) => UeyeNative.IS_BINNING_16X_HORIZONTAL,
+            (2, false, false) => UeyeNative.IS_BINNING_2X_VERTICAL,
+            (3, false, false) => UeyeNative.IS_BINNING_3X_VERTICAL,
+            (4, false, false) => UeyeNative.IS_BINNING_4X_VERTICAL,
+            (5, false, false) => UeyeNative.IS_BINNING_5X_VERTICAL,
+            (6, false, false) => UeyeNative.IS_BINNING_6X_VERTICAL,
+            (8, false, false) => UeyeNative.IS_BINNING_8X_VERTICAL,
+            (16, false, false) => UeyeNative.IS_BINNING_16X_VERTICAL,
+            _ => 0,
+        };
+    }
+
+    private static int ToGainFactor(int masterGain, double minGainDb, double maxGainDb)
+    {
+        var gainDb = ToGainDbFromMasterGain(masterGain, minGainDb, maxGainDb);
+        return GainDbToFactor(gainDb);
+    }
+
+    private static int FromGainFactor(int factor, double minGainDb, double maxGainDb)
+    {
+        if (factor <= 0)
+        {
+            return UeyeNative.IS_MIN_GAIN;
+        }
+
+        if (factor <= RayCiGainStepsDb.Length)
+        {
+            var gainDb = RayCiGainStepsDb[Math.Clamp(factor - 1, 0, RayCiGainStepsDb.Length - 1)];
+            return FromGainDb(gainDb, minGainDb, maxGainDb);
+        }
+
+        // Real uEye gain factors are multiplicative values where 100 means 1.0x
+        // (0 dB), 158 means ~4 dB, 251 means ~8 dB, etc. Keep the small RayCi
+        // compatibility indices above, but do not reinterpret 100 as "100% gain".
+        if (factor < 100)
+        {
+            return Math.Clamp(factor, UeyeNative.IS_MIN_GAIN, UeyeNative.IS_MAX_GAIN);
+        }
+
+        var mappedGainDb = FactorToGainDb(factor);
+        return FromGainDb(mappedGainDb, minGainDb, maxGainDb);
+    }
+
+    private static double ToGainDbFromMasterGain(int masterGain, double minGainDb, double maxGainDb)
+    {
+        if (!(maxGainDb > minGainDb))
+        {
+            return minGainDb;
+        }
+
+        var normalized = Math.Clamp(masterGain, UeyeNative.IS_MIN_GAIN, UeyeNative.IS_MAX_GAIN) / 100.0;
+        return minGainDb + (normalized * (maxGainDb - minGainDb));
+    }
+
+    private static int FromGainDb(double gainDb, double minGainDb, double maxGainDb)
+    {
+        if (!(maxGainDb > minGainDb))
+        {
+            return UeyeNative.IS_MIN_GAIN;
+        }
+
+        var clampedGainDb = Math.Clamp(gainDb, minGainDb, maxGainDb);
+        var normalized = (clampedGainDb - minGainDb) / (maxGainDb - minGainDb);
+        return (int)Math.Round(Math.Clamp(normalized * 100.0, UeyeNative.IS_MIN_GAIN, UeyeNative.IS_MAX_GAIN));
+    }
+
+    private static int GainDbToFactor(double gainDb)
+        => (int)Math.Clamp(Math.Round(100.0 * Math.Pow(10.0, gainDb / 20.0)), 100.0, short.MaxValue);
+
+    private static double FactorToGainDb(int factor)
+    {
+        if (factor <= 0)
+        {
+            return 0.0;
+        }
+
+        return 20.0 * Math.Log10(factor / 100.0);
+    }
 
     private static void SetCapturedExposureRegisterLocked(double exposureMs)
     {

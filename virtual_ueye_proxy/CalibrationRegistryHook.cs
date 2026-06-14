@@ -50,7 +50,7 @@ internal static unsafe class CalibrationRegistryHook
     private const bool EnableVirtualRegistry = false;
     private const string BaseCalibrationName = "CinCam CMOS 1201";
     private const string Base1201ExposureTimesCsv = "100,200,300,450,700,1000,1500,2000,3000,4500,7000,10000,15000,20000,30000,45000,70000,100000,140000";
-    private const string RayCiElExposureTimesCsv = "30000,45000,70000,100000,150000,200000,300000";
+    private const string RayCiElExposureTimesCsv = CapturedCameraProfile.ExposureTimesCsv;
     private const string RayCiGainCsv = "1,1.584893192,2.511886432,3.981071706,6.30957344480193";
 
     private static bool _installAttempted;
@@ -206,15 +206,9 @@ internal static unsafe class CalibrationRegistryHook
         }
 
         lines.Add($"SensorKeyName={SensorKeyName}");
-        lines.Add($"LicensedCameraKeyName={LicensedCameraKeyName}");
-        lines.Add($"FullCameraKeyName={FullCameraKeyName}");
-        lines.Add($"ReverseFullCameraKeyName={ReverseFullCameraKeyName}");
-        lines.Add($"CapturedSerialKeyName={CapturedSerialKeyName}");
-        lines.Add($"CapturedFullCameraKeyName={CapturedFullCameraKeyName}");
-        lines.Add($"CapturedReverseFullCameraKeyName={CapturedReverseFullCameraKeyName}");
         lines.Add($"ListedSerialKeyName={ListedSerialKeyName}");
         lines.Add($"ListedFullCameraKeyName={ListedFullCameraKeyName}");
-        lines.Add($"ListedReverseFullCameraKeyName={ListedReverseFullCameraKeyName}");
+        lines.Add($"ListedDisplaySerial={VirtualCameraState.DisplaySerialShort}");
         lines.Add(string.Empty);
         AppendRegistryNode(lines, VirtualHklm, depth: 0, maxDepth: 8);
     }
@@ -1707,7 +1701,7 @@ internal static unsafe class CalibrationRegistryHook
 
         cameraNode.SetValue("AutoExposure Max", "0.9");
         cameraNode.SetValue("AutoExposure Min", "0.5");
-        cameraNode.SetValue("BitDepth", "max");
+        cameraNode.SetValue("BitDepth", "10");
         cameraNode.SetValue("ColorFormat", "Y16");
         cameraNode.SetValue("Brightness Factor", "0.000679347826");
         cameraNode.SetValue("Brightness Val", "64");
@@ -1716,7 +1710,7 @@ internal static unsafe class CalibrationRegistryHook
         cameraNode.SetValue("Crop Bottom", "1");
         cameraNode.SetValue("Crop Top", "1");
         cameraNode.SetValue("Equipment", BaseCalibrationName);
-        cameraNode.SetValue("FrameRate", "20");
+        cameraNode.SetValue("FrameRate", "30");
         cameraNode.SetValue("Name", VirtualCameraState.RegistryModel);
         cameraNode.SetValue("PixelClock", "34");
         cameraNode.SetValue("Technology", "CMOS");
@@ -1761,7 +1755,7 @@ internal static unsafe class CalibrationRegistryHook
 
         cameraNode.SetValue("AutoExposure Max", "0.9");
         cameraNode.SetValue("AutoExposure Min", "0.5");
-        cameraNode.SetValue("BitDepth", "max");
+        cameraNode.SetValue("BitDepth", "10");
         cameraNode.SetValue("Brightness Factor", "0.003408715 * 1.25");
         cameraNode.SetValue("Brightness Offset", "13");
         cameraNode.SetValue("Brightness Val", "20");
@@ -1771,7 +1765,7 @@ internal static unsafe class CalibrationRegistryHook
         cameraNode.SetValue("Crop Bottom", "0");
         cameraNode.SetValue("Crop Top", "0");
         cameraNode.SetValue("Equipment", VirtualCameraState.CalibrationName);
-        cameraNode.SetValue("FrameRate", "15");
+        cameraNode.SetValue("FrameRate", "30");
         cameraNode.SetValue("Name", GetCameraDisplayName(alias));
         cameraNode.SetValue("PixelClock", "34");
         cameraNode.SetValue("Technology", "CMOS");
@@ -2073,7 +2067,7 @@ internal static unsafe class CalibrationRegistryHook
     {
         cameraNode.SetValue("AutoExposure Max", "0.9");
         cameraNode.SetValue("AutoExposure Min", "0.5");
-        cameraNode.SetValue("BitDepth", "max");
+        cameraNode.SetValue("BitDepth", "10");
         cameraNode.SetValue("Brightness Factor", "0.003408715 * 1.25");
         cameraNode.SetValue("Brightness Offset", "13");
         cameraNode.SetValue("Brightness Val", "20");
@@ -2082,7 +2076,7 @@ internal static unsafe class CalibrationRegistryHook
         cameraNode.SetValue("Crop Bottom", "0");
         cameraNode.SetValue("Crop Top", "0");
         cameraNode.SetValue("Equipment", VirtualCameraState.CalibrationName);
-        cameraNode.SetValue("FrameRate", "15");
+        cameraNode.SetValue("FrameRate", "30");
         cameraNode.SetValue("Name", GetCameraDisplayName(alias));
         cameraNode.SetValue("PixelClock", "34");
         cameraNode.SetValue("Technology", "CMOS");
@@ -2164,7 +2158,7 @@ internal static unsafe class CalibrationRegistryHook
         node.SetValue("Technology", "CMOS");
         node.SetValue("Triggering", "0");
         node.SetValue("BufferCnt", "8");
-        node.SetValue("BitDepth", "max");
+        node.SetValue("BitDepth", "10");
         node.SetValue("ColorFormat", "Y16");
         node.SetValue("CameraMode", "0");
         node.SetValue("Low Noise Binning", "0");
@@ -2181,10 +2175,10 @@ internal static unsafe class CalibrationRegistryHook
         node.SetValue("Crop Right", "0");
         node.SetValue("Crop Top", "0");
         node.SetValue("Crop Bottom", "0");
-        node.SetValue("FrameRate", "15");
-        node.SetValue("FrameRate_2x2", "15");
-        node.SetValue("FrameRate_4x4", "15");
-        node.SetValue("FrameRate_8x8", "15");
+        node.SetValue("FrameRate", "30");
+        node.SetValue("FrameRate_2x2", "30");
+        node.SetValue("FrameRate_4x4", "30");
+        node.SetValue("FrameRate_8x8", "30");
         node.SetValue("Bandwidth", "480");
         node.SetValue("PixelClock", "34");
         node.SetValue("PixelClock_2x2", "34");
@@ -2289,27 +2283,6 @@ internal static unsafe class CalibrationRegistryHook
 
         foreach (var keyName in new[]
                  {
-                     FullCameraKeyName,
-                     LicensedCameraKeyName,
-                     VirtualCameraState.UeyeSerial
-                 })
-        {
-            if (Add(keyName))
-            {
-                yield return new CameraKeyAlias(
-                    keyName,
-                    IncludePerCameraMetadata: true,
-                    RegistryName: VirtualCameraState.RegistryModel,
-                    DeviceSerial: VirtualCameraState.DisplaySerial,
-                    DeviceSerialShort: VirtualCameraState.DisplaySerialShort,
-                    CameraSerial: VirtualCameraState.UeyeSerial,
-                    GuidLow: LicensedCameraKeyName,
-                    UseMinimalMetadataShape: true);
-            }
-        }
-
-        foreach (var keyName in new[]
-                 {
                      VirtualCameraState.DisplaySerialShort,
                      ListedSerialKeyName,
                      ListedFullCameraKeyName
@@ -2329,75 +2302,31 @@ internal static unsafe class CalibrationRegistryHook
             }
         }
 
-        if (ShouldExposeCapturedCompatibilityAliases())
-        {
-            foreach (var keyName in new[]
-                     {
-                         CapturedFullCameraKeyName,
-                         ShouldExposeReverseCompatibilityAliases() ? CapturedReverseFullCameraKeyName : string.Empty,
-                         CapturedSerialKeyName,
-                         VirtualCameraState.CapturedRawSerial,
-                         VirtualCameraState.BoardSerial
-                     })
-            {
-                if (!string.IsNullOrWhiteSpace(keyName) && Add(keyName))
-                {
-                    yield return new CameraKeyAlias(
-                        keyName,
-                        IncludePerCameraMetadata: true,
-                        RegistryName: VirtualCameraState.CalibrationName,
-                        DeviceSerial: VirtualCameraState.DisplaySerial,
-                        DeviceSerialShort: VirtualCameraState.DisplaySerialShort,
-                        CameraSerial: VirtualCameraState.CapturedRawSerial,
-                        GuidLow: CapturedSerialKeyName,
-                        UseMinimalMetadataShape: true);
-                }
-            }
-        }
     }
 
     private static bool ShouldExposeCapturedCompatibilityAliases()
     {
-        return string.Equals(
-                   Environment.GetEnvironmentVariable("ULTRON_RAYCI_LIST_SERIAL_STYLE"),
-                   "captured",
-                   StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(
-                   Environment.GetEnvironmentVariable("ULTRON_RAYCI_EXPOSE_CAPTURED_ALIASES"),
-                   "1",
-                   StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 
     private static bool ShouldExposeModelCompatibilityAliases()
     {
-        return string.Equals(
-            Environment.GetEnvironmentVariable("ULTRON_RAYCI_EXPOSE_MODEL_ALIASES"),
-            "1",
-            StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 
     private static bool ShouldExposeVerboseEquipmentMetadata()
     {
-        return string.Equals(
-            Environment.GetEnvironmentVariable("ULTRON_RAYCI_EXPOSE_VERBOSE_CAMERA_METADATA"),
-            "1",
-            StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 
     private static bool ShouldExposeReverseCompatibilityAliases()
     {
-        return string.Equals(
-            Environment.GetEnvironmentVariable("ULTRON_RAYCI_EXPOSE_REVERSE_ALIASES"),
-            "1",
-            StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 
     private static bool ShouldExposeExtendedCompatibilityKeys()
     {
-        return string.Equals(
-            Environment.GetEnvironmentVariable("ULTRON_RAYCI_EXPOSE_EXTENDED_CAMERA_KEYS"),
-            "1",
-            StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 
     private static string BuildFullCameraKeyName(string decimalSerial)

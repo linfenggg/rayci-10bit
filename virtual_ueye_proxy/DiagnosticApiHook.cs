@@ -26,10 +26,14 @@ internal static unsafe class DiagnosticApiHook
     private const uint LvmInsertItemW = LvmFirst + 77;
     private const uint LvmSetItemTextW = LvmFirst + 116;
     private const int MaxClassNameChars = 128;
+    private const int MaxWindowTextChars = 512;
     private const int IdentificationSingletonSlotRva = 0x761340;
     private const int IdentificationMethodSlotOffset = 0x08;
     private const int IdentificationDescriptorSize = 0x40;
     private const ulong MaxCanonicalUserPointer = 0x0000_7FFF_FFFF_FFFF;
+    private const int FrameRateMinTextControlId = 2055;
+    private const int FrameRateMaxTextControlId = 2056;
+    private const int FrameRateCurrentEditControlId = 2058;
 
     private static readonly object Gate = new();
     private static readonly object IdentificationMutationGate = new();
@@ -43,9 +47,7 @@ internal static unsafe class DiagnosticApiHook
     private static readonly HashSet<uint> KnownIdentificationSerialComponents = BuildKnownIdentificationSerialComponents();
     private static readonly bool ForceAllowIdentification =
         string.Equals(Environment.GetEnvironmentVariable("ULTRON_RAYCI_IDENTIFICATION_FORCE_ALLOW"), "1", StringComparison.OrdinalIgnoreCase);
-    private static readonly bool ExtendIdentificationAllowList =
-        string.Equals(Environment.GetEnvironmentVariable("ULTRON_RAYCI_IDENTIFICATION_EXTEND"), "1", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(Environment.GetEnvironmentVariable("ULTRON_RAYCI_SIMULATE"), "1", StringComparison.OrdinalIgnoreCase);
+    private static readonly bool ExtendIdentificationAllowList = DetermineExtendIdentificationAllowList();
 
     private static bool _installAttempted;
     private static nint _selfModule;
@@ -178,6 +180,15 @@ internal static unsafe class DiagnosticApiHook
     [DllImport("user32.dll", EntryPoint = "GetClassNameW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern int GetClassNameW(nint windowHandle, char* className, int maxCount);
 
+    [DllImport("user32.dll", EntryPoint = "GetWindowTextW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetWindowTextW(nint windowHandle, char* text, int maxCount);
+
+    [DllImport("user32.dll", EntryPoint = "GetParent", SetLastError = true)]
+    private static extern nint GetParent(nint windowHandle);
+
+    [DllImport("user32.dll", EntryPoint = "GetDlgCtrlID", SetLastError = true)]
+    private static extern int GetDlgCtrlID(nint windowHandle);
+
     public static void TryInstall()
     {
         lock (Gate)
@@ -204,6 +215,37 @@ internal static unsafe class DiagnosticApiHook
         catch (Exception ex)
         {
             VirtualCameraState.Log($"DiagnosticApiHook: install failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static bool DetermineExtendIdentificationAllowList()
+    {
+        var explicitSetting = Environment.GetEnvironmentVariable("ULTRON_RAYCI_IDENTIFICATION_EXTEND");
+        if (string.Equals(explicitSetting, "1", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(explicitSetting, "0", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(Environment.GetEnvironmentVariable("ULTRON_RAYCI_SIMULATE"), "1", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            var mainModule = process.MainModule;
+            return mainModule is not null &&
+                   string.Equals(mainModule.ModuleName, "RayCi.exe", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -562,6 +604,16 @@ internal static unsafe class DiagnosticApiHook
             return suppressedResult;
         }
 
+        if (message == WmSetText &&
+            TryGetSyntheticFrameRateControlText(windowHandle, out var replacementText))
+        {
+            TraceUser32Message("SendMessageW", windowHandle, message, adjustedWParam, lParam, unicode: true);
+            fixed (char* replacementPtr = replacementText)
+            {
+                return SendMessageW(windowHandle, message, adjustedWParam, (nint)replacementPtr);
+            }
+        }
+
         var trackCameraInsert = IsCameraListInsert(windowHandle, message, lParam, unicode: true);
         TraceUser32Message("SendMessageW", windowHandle, message, adjustedWParam, lParam, unicode: true);
         var result = SendMessageW(windowHandle, message, adjustedWParam, lParam);
@@ -583,6 +635,17 @@ internal static unsafe class DiagnosticApiHook
             return suppressedResult;
         }
 
+        if (message == WmSetText &&
+            TryGetSyntheticFrameRateControlText(windowHandle, out var replacementText))
+        {
+            TraceUser32Message("SendMessageA", windowHandle, message, adjustedWParam, lParam, unicode: false);
+            var replacementBytes = Encoding.ASCII.GetBytes(replacementText + '\0');
+            fixed (byte* replacementPtr = replacementBytes)
+            {
+                return SendMessageA(windowHandle, message, adjustedWParam, (nint)replacementPtr);
+            }
+        }
+
         var trackCameraInsert = IsCameraListInsert(windowHandle, message, lParam, unicode: false);
         TraceUser32Message("SendMessageA", windowHandle, message, adjustedWParam, lParam, unicode: false);
         var result = SendMessageA(windowHandle, message, adjustedWParam, lParam);
@@ -598,6 +661,14 @@ internal static unsafe class DiagnosticApiHook
     private static int SetWindowTextWHook(nint windowHandle, char* text)
     {
         TraceSetWindowText("SetWindowTextW", windowHandle, SafePtrToStringUni(text));
+        if (TryGetSyntheticFrameRateControlText(windowHandle, out var replacementText))
+        {
+            fixed (char* replacementPtr = replacementText)
+            {
+                return SetWindowTextW(windowHandle, replacementPtr) ? 1 : 0;
+            }
+        }
+
         return SetWindowTextW(windowHandle, text) ? 1 : 0;
     }
 
@@ -605,6 +676,15 @@ internal static unsafe class DiagnosticApiHook
     private static int SetWindowTextAHook(nint windowHandle, byte* text)
     {
         TraceSetWindowText("SetWindowTextA", windowHandle, SafePtrToStringAnsi(text));
+        if (TryGetSyntheticFrameRateControlText(windowHandle, out var replacementText))
+        {
+            var replacementBytes = Encoding.ASCII.GetBytes(replacementText + '\0');
+            fixed (byte* replacementPtr = replacementBytes)
+            {
+                return SetWindowTextA(windowHandle, replacementPtr) ? 1 : 0;
+            }
+        }
+
         return SetWindowTextA(windowHandle, text) ? 1 : 0;
     }
 
@@ -1456,6 +1536,113 @@ internal static unsafe class DiagnosticApiHook
         var buffer = stackalloc char[MaxClassNameChars];
         var length = GetClassNameW(windowHandle, buffer, MaxClassNameChars);
         return length > 0 ? new string(buffer, 0, length) : null;
+    }
+
+    private static bool TryGetSyntheticFrameRateControlText(nint windowHandle, out string replacementText)
+    {
+        replacementText = string.Empty;
+        if (windowHandle == nint.Zero)
+        {
+            return false;
+        }
+
+        int controlId;
+        try
+        {
+            controlId = GetDlgCtrlID(windowHandle);
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (controlId != FrameRateMinTextControlId &&
+            controlId != FrameRateMaxTextControlId &&
+            controlId != FrameRateCurrentEditControlId)
+        {
+            return false;
+        }
+
+        if (!IsRayCiOptionsDialogChild(windowHandle))
+        {
+            return false;
+        }
+
+        ResolveFrameRateDisplayValues(out var minFrameRateHz, out var maxFrameRateHz, out var currentFrameRateHz);
+        replacementText = controlId switch
+        {
+            FrameRateMinTextControlId => $"{minFrameRateHz.ToString("0.0", CultureInfo.InvariantCulture)} fps",
+            FrameRateMaxTextControlId => $"{maxFrameRateHz.ToString("0.0", CultureInfo.InvariantCulture)} fps",
+            FrameRateCurrentEditControlId => currentFrameRateHz.ToString("0.0", CultureInfo.InvariantCulture),
+            _ => string.Empty,
+        };
+
+        return replacementText.Length > 0;
+    }
+
+    private static bool IsRayCiOptionsDialogChild(nint windowHandle)
+    {
+        for (var current = windowHandle; current != nint.Zero; current = GetParent(current))
+        {
+            var className = GetWindowClassName(current);
+            if (!string.Equals(className, "#32770", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var title = GetWindowText(current);
+            if (title.StartsWith("LiveMode: Options - ", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string GetWindowText(nint windowHandle)
+    {
+        if (windowHandle == nint.Zero)
+        {
+            return string.Empty;
+        }
+
+        var buffer = stackalloc char[MaxWindowTextChars];
+        var length = GetWindowTextW(windowHandle, buffer, MaxWindowTextChars);
+        return length > 0 ? new string(buffer, 0, length) : string.Empty;
+    }
+
+    private static void ResolveFrameRateDisplayValues(
+        out double minFrameRateHz,
+        out double maxFrameRateHz,
+        out double currentFrameRateHz)
+    {
+        const double compatibleMinFrameRateHz = 1.0;
+        const double compatibleMaxFrameRateHz = 30.0;
+
+        minFrameRateHz = compatibleMinFrameRateHz;
+        maxFrameRateHz = compatibleMaxFrameRateHz;
+        currentFrameRateHz = compatibleMaxFrameRateHz;
+
+        if (!DahengFrameBridgeClient.TryGetControlState(out var state))
+        {
+            return;
+        }
+
+        minFrameRateHz = state.FrameRateMinHz > 0.0 ? state.FrameRateMinHz : compatibleMinFrameRateHz;
+        maxFrameRateHz = state.FrameRateMaxHz >= minFrameRateHz ? state.FrameRateMaxHz : compatibleMaxFrameRateHz;
+
+        if (maxFrameRateHz <= 0.0 || maxFrameRateHz < minFrameRateHz)
+        {
+            minFrameRateHz = compatibleMinFrameRateHz;
+            maxFrameRateHz = compatibleMaxFrameRateHz;
+        }
+
+        minFrameRateHz = Math.Clamp(minFrameRateHz, compatibleMinFrameRateHz, compatibleMaxFrameRateHz);
+        maxFrameRateHz = Math.Clamp(maxFrameRateHz, minFrameRateHz, compatibleMaxFrameRateHz);
+
+        var bridgeCurrentFrameRateHz = state.FrameRateHz > 0.0 ? state.FrameRateHz : maxFrameRateHz;
+        currentFrameRateHz = Math.Clamp(bridgeCurrentFrameRateHz, minFrameRateHz, maxFrameRateHz);
     }
 
     private static string DescribeNativeCallers()

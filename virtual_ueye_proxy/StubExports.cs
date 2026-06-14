@@ -8,7 +8,8 @@ internal static unsafe partial class Exports
     public static int Stub_AutoParameter() => Unsupported("is_AutoParameter");
 
     [UnmanagedCallersOnly(EntryPoint = "is_Blacklevel")]
-    public static int Stub_Blacklevel() => SuccessNoOp("is_Blacklevel");
+    public static int Stub_Blacklevel(uint cameraHandle, uint command, void* parameter, uint parameterSize)
+        => VirtualCameraState.Blacklevel(command, parameter, parameterSize);
 
     [UnmanagedCallersOnly(EntryPoint = "is_BoardStatus")]
     public static int Stub_BoardStatus() => Unsupported("is_BoardStatus");
@@ -245,7 +246,7 @@ internal static unsafe partial class Exports
     public static int Stub_SetBayerConversion() => Unsupported("is_SetBayerConversion");
 
     [UnmanagedCallersOnly(EntryPoint = "is_SetBinning")]
-    public static int Stub_SetBinning() => SuccessNoOp("is_SetBinning");
+    public static int Stub_SetBinning(uint cameraHandle, int mode) => VirtualCameraState.SetBinning(mode);
 
     [UnmanagedCallersOnly(EntryPoint = "is_SetBlCompensation")]
     public static int Stub_SetBlCompensation() => Unsupported("is_SetBlCompensation");
@@ -374,7 +375,7 @@ internal static unsafe partial class Exports
     public static int Stub_SetStarterFirmware() => Unsupported("is_SetStarterFirmware");
 
     [UnmanagedCallersOnly(EntryPoint = "is_SetSubSampling")]
-    public static int Stub_SetSubSampling() => Unsupported("is_SetSubSampling");
+    public static int Stub_SetSubSampling(uint cameraHandle, int mode) => VirtualCameraState.SetSubSampling(mode);
 
     [UnmanagedCallersOnly(EntryPoint = "is_SetSync")]
     public static int Stub_SetSync() => Unsupported("is_SetSync");
@@ -630,20 +631,20 @@ internal static unsafe partial class Exports
     [UnmanagedCallersOnly(EntryPoint = "is_RetrievePixelsizeFromColormode_B")]
     public static int Stub_RetrievePixelsizeFromColormodeBytes()
     {
-        var bitsPerPixel = VirtualCameraState.GetColorModeOrBits(UeyeNative.IS_GET_BITS_PER_PIXEL);
-        var bytesPerPixel = UeyeNative.GetBytesPerPixel(bitsPerPixel);
-        VirtualCameraState.Log($"is_RetrievePixelsizeFromColormode_B -> {bytesPerPixel}");
+        var resolvedBits = VirtualCameraState.GetColorModeOrBits(UeyeNative.IS_GET_BITS_PER_PIXEL);
+        var compatibilityPixelSize = Math.Max(1, (resolvedBits + 7) / 8);
+        VirtualCameraState.Log($"is_RetrievePixelsizeFromColormode_B -> {compatibilityPixelSize} (resolvedBits={resolvedBits})");
         _ = VirtualCameraState.SetLastError(UeyeNative.IS_SUCCESS, "OK");
-        return bytesPerPixel;
+        return compatibilityPixelSize;
     }
 
     [UnmanagedCallersOnly(EntryPoint = "is_RetrievePixelsizeFromColormode_b")]
     public static int Stub_RetrievePixelsizeFromColormodeBits()
     {
-        var bitsPerPixel = VirtualCameraState.GetColorModeOrBits(UeyeNative.IS_GET_BITS_PER_PIXEL);
-        VirtualCameraState.Log($"is_RetrievePixelsizeFromColormode_b -> {bitsPerPixel}");
+        var compatibilityPixelSize = VirtualCameraState.GetColorModeOrBits(UeyeNative.IS_GET_BITS_PER_PIXEL);
+        VirtualCameraState.Log($"is_RetrievePixelsizeFromColormode_b -> {compatibilityPixelSize}");
         _ = VirtualCameraState.SetLastError(UeyeNative.IS_SUCCESS, "OK");
-        return bitsPerPixel;
+        return compatibilityPixelSize;
     }
 
     [UnmanagedCallersOnly(EntryPoint = "is_SPIExchangeBuffer")]

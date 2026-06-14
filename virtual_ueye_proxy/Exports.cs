@@ -44,14 +44,9 @@ internal static unsafe partial class Exports
     }
 
     [UnmanagedCallersOnly(EntryPoint = "is_GetNumberOfDevices")]
-    public static int IsGetNumberOfDevices(int* count)
+    public static int IsGetNumberOfDevices()
     {
-        if (count != null)
-        {
-            *count = 1;
-        }
-
-        return VirtualCameraState.SetLastError(UeyeNative.IS_SUCCESS, "OK");
+        return 1;
     }
 
     [UnmanagedCallersOnly(EntryPoint = "is_GetNumberOfBoards")]
@@ -185,8 +180,7 @@ internal static unsafe partial class Exports
                 }
                 {
                     var rect = (IS_RECT*)parameter;
-                    VirtualCameraState.SetAoiPosition(rect->s32X, rect->s32Y);
-                    return VirtualCameraState.SetAoiSize(rect->s32Width, rect->s32Height);
+                    return VirtualCameraState.SetAoi(rect->s32X, rect->s32Y, rect->s32Width, rect->s32Height);
                 }
             case UeyeNative.IS_AOI_IMAGE_GET_AOI:
             case UeyeNative.IS_AOI_IMAGE_GET_ORIGINAL_AOI:
@@ -276,17 +270,11 @@ internal static unsafe partial class Exports
 
     [UnmanagedCallersOnly(EntryPoint = "is_SetAOI")]
     public static int IsSetAoi(uint cameraHandle, int x, int y, int width, int height)
-    {
-        VirtualCameraState.SetAoiPosition(x, y);
-        return VirtualCameraState.SetAoiSize(width, height);
-    }
+        => VirtualCameraState.SetAoi(x, y, width, height);
 
     [UnmanagedCallersOnly(EntryPoint = "is_SetImageAOI")]
     public static int IsSetImageAoi(uint cameraHandle, int x, int y, int width, int height)
-    {
-        VirtualCameraState.SetAoiPosition(x, y);
-        return VirtualCameraState.SetAoiSize(width, height);
-    }
+        => VirtualCameraState.SetAoi(x, y, width, height);
 
     [UnmanagedCallersOnly(EntryPoint = "is_SetImagePos")]
     public static int IsSetImagePos(uint cameraHandle, int x, int y) => VirtualCameraState.SetAoiPosition(x, y);
@@ -544,7 +532,7 @@ internal static unsafe partial class Exports
     }
 
     [UnmanagedCallersOnly(EntryPoint = "is_Configuration")]
-    public static int IsConfiguration(uint cameraHandle, uint command, void* parameter, uint parameterSize)
+    public static int IsConfiguration(uint command, void* parameter, uint parameterSize)
     {
         VirtualCameraState.Log($"is_Configuration(command={command}, size={parameterSize})");
         return VirtualCameraState.HandleConfiguration(command, parameter, parameterSize);

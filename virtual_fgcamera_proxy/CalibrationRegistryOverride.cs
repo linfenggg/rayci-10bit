@@ -19,6 +19,7 @@ internal static unsafe class CalibrationRegistryOverride
     private const string CapturedRawSerial = "1145655880";
     private const string CapturedBoardSerial = "RH1015005021";
     private const string SerialTemplate = "1201EL-U2-{KW:2}{Year:2}-{Number:4}";
+    private const string RayCiExposureTimesCsv = "300,450,700,1000,1500,2000,2500,3000,3500,4000,4500,5000,6000,7000,8000,9000,10000,12000,14000,16000,18000,20000,22500,25000,27500,30000,32500,35000,37500,40000,42500,45000,47500,50000,55000,60000,65000,70000,75000,80000,85000,90000,95000,100000,110000,120000,130000,140000,150000,160000,170000,180000,190000,200000,225000,250000,275000,300000";
 
     private static readonly object Sync = new();
     private static readonly string LicensedCameraKeyName = BuildSerialKeyName(RegistrySerial);
@@ -172,7 +173,7 @@ internal static unsafe class CalibrationRegistryOverride
     {
         cameraNode.SetValue("AutoExposure Max", "0.9");
         cameraNode.SetValue("AutoExposure Min", "0.5");
-        cameraNode.SetValue("BitDepth", "8");
+        cameraNode.SetValue("BitDepth", "10");
         cameraNode.SetValue("Brightness Factor", "0.000679347826");
         cameraNode.SetValue("Brightness Val", "64");
         cameraNode.SetValue("BufferCnt", "8");
@@ -229,7 +230,7 @@ internal static unsafe class CalibrationRegistryOverride
         plainNode.SetValue("AOI CenterY", "0");
         plainNode.SetValue("AOI RadiusX", "2.6");
         plainNode.SetValue("AOI RadiusY", "2.6");
-        plainNode.SetValue("Exposure Times", "300,450,700,1000,1500,2000,3000,4500,7000,10000,15000,20000,30000,45000,70000,100000,150000,200000,300000");
+        plainNode.SetValue("Exposure Times", RayCiExposureTimesCsv);
         plainNode.SetValue("Gain", "1,1.584893192,2.511886432,3.981071706,6.30957344480193");
         plainNode.SetValue("MirrorY", "1");
         plainNode.SetValue("ScaleX", "1");
@@ -256,7 +257,7 @@ internal static unsafe class CalibrationRegistryOverride
         cameraNode.SetValue("Technology", "CMOS");
         cameraNode.SetValue("Triggering", "0");
         cameraNode.SetValue("BufferCnt", "4");
-        cameraNode.SetValue("BitDepth", "max");
+        cameraNode.SetValue("BitDepth", "10");
         cameraNode.SetValue("ColorFormat", "Y16");
         cameraNode.SetValue("CameraMode", "0");
         cameraNode.SetValue("Low Noise Binning", "0");

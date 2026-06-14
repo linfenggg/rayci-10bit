@@ -1,178 +1,82 @@
-# RayCi USB camera bridge bring-up
+# RayCi Single-Camera Compatibility Bridge
 
-Correction on 2026-06-10:
+This workspace is now focused on one camera only:
 
-- `MER-130-30UM-L` and `RH1015005021` may appear in older notes, tools, or raw page captures.
-- They should now be treated as suspect raw-page identity fields, not as the default outward identity of the simulator.
+- Daheng model prefix `MER-130-30UM`
+- Any serial number, with optional `BEAMMIC_DAHENG_SN` override
+- `Mono10`
+- `1280 x 1024`
 
-This machine can see the Daheng camera and `GalaxyView` can display the image stream, but the default SDK install is mixed with an older system DLL:
+The outward identity exposed to RayCi stays fixed as:
 
-- `C:\Windows\System32\GxIAPI.dll` -> `1.10.2105.8281`
-- `C:\Program Files\Daheng Imaging\GalaxySDK\APIDll\Win64\GxIAPI.dll` -> `2.0.2603.8121`
+- `CinCam CMOS 1201 EL`
+- serial `1201EL-U2-1022-0034`
 
-That mismatch causes the stock SDK tools and samples to fail with entry-point / ordinal errors when they pick up the old `System32` DLL first.
+That fixed shell is only for RayCi compatibility. The image stream, exposure, gain, and register-page emulation are all driven by the real Daheng camera.
 
-## Quick start
+## Main components
 
-Run:
+- `virtual_ueye_proxy`
+  - exports the `ueye_api_64.dll` compatibility layer expected by RayCi
+  - exposes a single fixed RayCi-facing camera identity
+- `daheng_frame_server`
+  - opens only Daheng USB cameras whose model starts with `MER-130-30UM`
+  - prefers `Mono10`
+  - publishes `1280x1024` frames to the bridge
+  - no longer auto-falls back to synthetic white-noise mode unless explicitly forced
+- `seed-rayci-calibration-registry.ps1`
+  - seeds only the minimal RayCi 2022 calibration keys needed for this one camera shell
+- `prepare-rayci-hybrid-portable.ps1`
+  - builds a portable RayCi folder with the uEye proxy and Daheng helper
+  - preserves the original `FGCamera.dll` from the RayCi install instead of replacing it
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\run-galaxy-viewer.ps1
-```
-
-The script builds a local `GalaxyViewPortable` folder in this workspace by combining:
-
-- `GalaxySDK\Demo\Win64`
-- `GalaxySDK\APIDll\Win64`
-
-Then it launches `GalaxyView.exe` from that folder so the matching camera DLLs are loaded first.
-
-## Probe streaming
-
-Run:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\run-daheng-probe.ps1
-```
-
-The probe does not depend on `GalaxyView`. It opens the first detected Daheng camera and tests both:
-
-- `TriggerMode=Off` free-run
-- `TriggerMode=On` with `TriggerSource=Software`
-
-It prints whether frames are actually received from the stream.
-
-## GenICam / GenTL compatibility
-
-This machine already has GenTL producers installed and exposed through `GENICAM_GENTL64_PATH`:
-
-- `C:\Program Files\Daheng Imaging\GalaxySDK\GenTL\Win64`
-- `C:\Program Files\CINOGY\Driver\CMOS_EL_USB\GenICam\TL`
-
-For this camera, the relevant producer is:
-
-- `GxUSBTL.cti`
-
-Do not confuse it with:
-
-- `GxU3VTL.cti` for USB3 Vision cameras
-- `GxGVTL.cti` for GigE Vision cameras
-
-If a third-party GenTL consumer needs a cleaner environment, launch it with:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\launch-with-daheng-gentl.ps1 -Program "C:\Path\To\YourConsumer.exe"
-```
-
-Add `-IncludeCinogy` if the OEM CTI is the one your application expects.
-
-## Inspect device state
-
-Run:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\inspect-daheng-camera.ps1
-```
-
-This prints:
-
-- the detected Daheng / USB Vision camera devices
-- the `GxIAPI.dll` versions from the SDK and from `System32`
-
-## Notes
-
-- The workspace copy is safer than replacing `C:\Windows\System32\GxIAPI.dll`.
-- Some host tools previously showed `MER-130-30UM-L`, but that name is now treated as a suspect raw-page identity field for simulation purposes.
-- If the SDK gets upgraded, rerun `run-galaxy-viewer.ps1 -ForceRefresh`.
-- On this machine the camera driver currently reports `DEVPKEY_Device_IsRebootRequired=True`, and `pnputil /restart-device` refuses to restart it until the system reboots.
-- Current probe result before reboot: the camera opens successfully, but both free-run and software-trigger acquisition time out with zero frames received.
-
-## After reboot findings
-
-- After the real Windows restart on `2026-06-09 01:04:24`, `DEVPKEY_Device_IsRebootRequired` changed to `False`.
-- Even after reboot, the probe still reports:
-
-```text
-SuccessfulFrames FreeRun=0 SoftTrigger=0
-```
-
-- `Bus Hound` capture is saved as [bushound_capture.txt](/D:/work/ultron/rayci-10bit/bushound_capture.txt).
-- The capture shows the Daheng camera responding on control endpoint `10.0` with many vendor control transfers.
-- The capture does **not** show any image payload transfers on stream endpoints. The only non-control endpoint activity seen for the camera is repeated `10.2 RESET`.
-
-This means the control plane is alive, but the image stream endpoint never starts delivering frame data.
-
-## Current best hypotheses
-
-1. USB2 camera streaming is not compatible with the current host path on this machine, most likely the Windows 11 + Intel xHCI path.
-2. The camera hardware/firmware can answer control commands, but its streaming endpoint is failing when acquisition starts.
-
-## Highest-value next checks
-
-1. Try the camera through a true USB 2.0 hub or a native USB 2.0 port.
-2. Try a different USB cable, ideally a short USB-IF certified cable with screw lock.
-3. Try the same camera on another PC, preferably Windows 10.
-
-Interpretation:
-
-- If it works on a Windows 10 machine or behind a USB 2.0 hub, the problem is host compatibility on this PC.
-- If it still has zero frames on another machine, the camera itself is very likely faulty at the streaming side.
-
-## RayCi uEye bridge
-
-This workspace now includes a `uEye`-compatible bridge that lets `RayCi` load a Daheng-backed virtual camera through a local `ueye_api_64.dll`.
-
-Build the bridge artifacts with:
+## Build
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build-rayci-ueye-bridge.ps1
 ```
 
-Prepare a portable `RayCi` folder without modifying `C:\Program Files`:
+Artifacts are published to:
+
+- `D:\work\ultron\rayci-10bit\artifacts\ueye_proxy`
+- `D:\work\ultron\rayci-10bit\artifacts\DahengBridgeHelper`
+
+## Prepare portable RayCi
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\prepare-rayci-bridge-portable.ps1
+powershell -ExecutionPolicy Bypass -File .\prepare-rayci-hybrid-portable.ps1
 ```
 
-The portable output is created under:
-
-- `D:\work\ultron\rayci-10bit\dist\RayCi64Lite-UeyeBridge`
-
-Current stable hybrid package with working image display:
+Default output:
 
 - `D:\work\ultron\rayci-10bit\dist\RayCi64Lite-HybridBridge-final`
-- Verified state: `10bpp (Y16): 1280 x 1024 at ~14 fps`
-- Verification dump: `D:\work\ultron\rayci-10bit\result_live_verify.control.txt`
 
-Bridge behavior:
-
-- `ueye_api_64.dll` is copied into the portable `RayCi` folder.
-- `DahengFrameServer.exe` and its Daheng runtime files are copied into `DahengBridgeHelper`.
-- The proxy first looks for the helper in `DahengBridgeHelper`, then beside `RayCi.exe`.
-- You can override helper discovery with the environment variable `ULTRON_RAYCI_BRIDGE_HELPER`.
-
-Bridge logs are written to:
-
-- `%LOCALAPPDATA%\Ultron\RayCiUeyeBridge\logs`
-
-## Synthetic white-noise feed
-
-The bridge simulation can now feed repeatable white-noise frames into `RayCi` without a physical camera.
-
-Use:
+## Launch and verify
 
 ```powershell
-$env:ULTRON_RAYCI_SIMULATE = '1'
-$env:ULTRON_RAYCI_AUTO_SIMULATE = '1'
-$env:ULTRON_RAYCI_SIM_PATTERN = 'white-noise'
+powershell -ExecutionPolicy Bypass -File .\launch-rayci-ueye-white-noise.ps1 -CloseExisting -FinalizeOpenLiveMode -Verify
 ```
 
-Then launch the portable `RayCi` bridge build. The default synthetic mode remains the existing moving beam/target pattern, so omit `ULTRON_RAYCI_SIM_PATTERN` if you want the earlier behavior.
+Despite the legacy filename, the launcher now runs only the real-camera path. It clears old simulation and compatibility environment variables, seeds the single-camera registry shell, and starts RayCi against:
 
-For the ready-to-run shortcut, use:
+- model prefix `MER-130-30UM`
+- pixel format `Mono10`
+- frame size `1280x1024`
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\launch-rayci-ueye-white-noise.ps1
-```
+Verification dumps are written beside the workspace using the selected dump prefix.
 
-The launch script now defaults to the stable hybrid package above.
+## Logs
+
+- `%LOCALAPPDATA%\Ultron\RayCiUeyeBridge\logs\ueye_proxy.log`
+- `%LOCALAPPDATA%\Ultron\RayCiUeyeBridge\logs\daheng_frame_server.log`
+- `%LOCALAPPDATA%\Ultron\RayCiUeyeBridge\logs\bridge_identity_report.txt`
+
+## Runtime intent
+
+The project is no longer intended to be a broad simulator or a multi-camera bridge. The maintained path is:
+
+1. RayCi loads `ueye_api_64.dll`.
+2. The proxy reports one fixed compatible camera shell.
+3. The Daheng helper opens the real Daheng camera whose model starts with `MER-130-30UM`.
+4. Real `Mono10` frames are converted into the `Y16` container RayCi expects.
+5. RayCi exposure and gain calls are translated back into Daheng feature control.

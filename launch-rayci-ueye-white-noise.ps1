@@ -1,13 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('white-noise', 'beam-target')]
-    [string]$Pattern = 'white-noise',
-    [ValidateSet('captured', 'registry')]
-    [string]$IdentityStyle = 'registry',
-    [ValidateSet('captured', 'licensed')]
-    [string]$ListSerialStyle = 'licensed',
     [switch]$CloseExisting,
-    [switch]$AllowDuplicateCameraRows,
     [switch]$FinalizeOpenLiveMode,
     [switch]$Verify,
     [double]$StartupTimeoutSec = 25.0,
@@ -59,6 +52,68 @@ function Stop-ExistingRayCi {
                 Stop-Process -Id $proc.Id -Force -ErrorAction Stop
             } catch {
                 Write-Warning "Unable to stop RayCi process $($proc.Id): $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+function Stop-ExistingDahengHelpers {
+    param(
+        [string]$AllowedExecutablePath
+    )
+
+    $allowedFullPath = $null
+    if (-not [string]::IsNullOrWhiteSpace($AllowedExecutablePath)) {
+        try {
+            $allowedFullPath = [System.IO.Path]::GetFullPath($AllowedExecutablePath)
+        } catch {
+            $allowedFullPath = $null
+        }
+    }
+
+    $helperNames = @('DahengFrameServer')
+    foreach ($name in $helperNames) {
+        $procs = @(Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object {
+            if ($null -eq $allowedFullPath) {
+                return $true
+            }
+
+            try {
+                return -not [string]::Equals($_.Path, $allowedFullPath, [System.StringComparison]::OrdinalIgnoreCase)
+            } catch {
+                return $true
+            }
+        })
+        if ($procs.Count -eq 0) {
+            continue
+        }
+
+        foreach ($proc in $procs) {
+            try {
+                if ($proc.MainWindowHandle -ne 0) {
+                    $null = $proc.CloseMainWindow()
+                }
+            } catch {
+            }
+        }
+
+        Start-Sleep -Milliseconds 800
+
+        foreach ($proc in @(Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object {
+            if ($null -eq $allowedFullPath) {
+                return $true
+            }
+
+            try {
+                return -not [string]::Equals($_.Path, $allowedFullPath, [System.StringComparison]::OrdinalIgnoreCase)
+            } catch {
+                return $true
+            }
+        })) {
+            try {
+                Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+            } catch {
+                Write-Warning "Unable to stop helper process $($proc.Id): $($_.Exception.Message)"
             }
         }
     }
@@ -205,6 +260,27 @@ function Invoke-RayCiButton {
     Start-Sleep -Milliseconds $DelayMs
 }
 
+function Select-RayCiItem {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Element,
+        [Parameter(Mandatory = $true)]
+        [string]$Label,
+        [int]$DelayMs = 500
+    )
+
+    $pattern = Get-SafeValue {
+        $Element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    } $null
+
+    if ($null -eq $pattern) {
+        throw "Selection item '$Label' does not support SelectionItemPattern."
+    }
+
+    $pattern.Select()
+    Start-Sleep -Milliseconds $DelayMs
+}
+
 function Wait-RayCiSelectionReady {
     param(
         [Parameter(Mandatory = $true)]
@@ -268,6 +344,16 @@ function Get-VerificationSummary {
     $connectionLine = $lines | Where-Object { $_ -like '*StatusBar.Pane1*' } | Select-Object -First 1
     $statusLine = $lines | Where-Object { $_ -like '*StatusBar.Pane2*' } | Select-Object -First 1
     $licenseLine = $lines | Where-Object { $_ -like '*no license*' } | Select-Object -First 1
+    $statusLineText = [string]$statusLine
+    $reportedBpp = 0
+    $reportedWidth = 0
+    $reportedHeight = 0
+
+    if ($statusLineText -match 'name="(?<bpp>\d+)bpp .*?: (?<width>\d+) x (?<height>\d+) at ') {
+        $reportedBpp = [int]$Matches['bpp']
+        $reportedWidth = [int]$Matches['width']
+        $reportedHeight = [int]$Matches['height']
+    }
 
     $statusAccepted =
         ($null -ne $liveModeLine) -and
@@ -275,8 +361,9 @@ function Get-VerificationSummary {
         ($null -ne $connectionLine) -and
         ($connectionLine -notlike '*not connected*') -and
         ($null -ne $statusLine) -and
-        ($statusLine -like '*bpp*') -and
-        ($statusLine -notlike '*0bpp*')
+        ($reportedBpp -gt 0) -and
+        ($reportedWidth -gt 0) -and
+        ($reportedHeight -gt 0)
 
     $liveViewAccepted =
         ($null -ne $liveModeLine) -and
@@ -284,7 +371,7 @@ function Get-VerificationSummary {
         ($null -ne $liveViewLine)
 
     $accepted =
-        ($statusAccepted -or $liveViewAccepted) -and
+        $statusAccepted -and
         ($null -eq $licenseLine)
 
     return [pscustomobject]@{
@@ -294,8 +381,45 @@ function Get-VerificationSummary {
         CameraRow     = $cameraLine
         Connection    = $connectionLine
         StreamStatus  = $statusLine
+        ReportedBpp   = $reportedBpp
+        ReportedWidth = $reportedWidth
+        ReportedHeight = $reportedHeight
         LicenseLine   = $licenseLine
     }
+}
+
+function Wait-RayCiAcceptedStatus {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DumpScript,
+        [Parameter(Mandatory = $true)]
+        [string]$ControlDumpPath,
+        [Parameter(Mandatory = $true)]
+        [string]$ControlJsonPath,
+        [double]$TimeoutSec = 30.0
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    $summary = $null
+
+    while ((Get-Date) -lt $deadline) {
+        & $DumpScript `
+            -ProcessName 'RayCi' `
+            -View 'Control' `
+            -MaxDepth 6 `
+            -IncludePatterns `
+            -TreeOut $ControlDumpPath `
+            -JsonOut $ControlJsonPath | Out-Null
+
+        $summary = Get-VerificationSummary -ControlDumpPath $ControlDumpPath
+        if ($summary.Accepted) {
+            return $summary
+        }
+
+        Start-Sleep -Milliseconds 1000
+    }
+
+    return $summary
 }
 
 $workspaceRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -305,7 +429,8 @@ $portableRoot = if ([string]::IsNullOrWhiteSpace($PortableRoot)) {
     [System.IO.Path]::GetFullPath($PortableRoot)
 }
 $rayciExe = Join-Path $portableRoot 'RayCi.exe'
-$prepareScript = Join-Path $workspaceRoot 'prepare-rayci-bridge-portable.ps1'
+$prepareScript = Join-Path $workspaceRoot 'prepare-rayci-hybrid-portable.ps1'
+$seedRegistryScript = Join-Path $workspaceRoot 'seed-rayci-calibration-registry.ps1'
 $dumpPrefixResolved = if ([string]::IsNullOrWhiteSpace($DumpPrefix)) {
     Join-Path $workspaceRoot 'result_live_verify'
 } else {
@@ -314,7 +439,7 @@ $dumpPrefixResolved = if ([string]::IsNullOrWhiteSpace($DumpPrefix)) {
 
 if (-not (Test-Path -LiteralPath $rayciExe)) {
     if (-not (Test-Path -LiteralPath $prepareScript)) {
-        throw "Portable RayCi bridge is missing and prepare-rayci-bridge-portable.ps1 was not found."
+        throw "Portable RayCi bridge is missing and prepare-rayci-hybrid-portable.ps1 was not found."
     }
 
     & $prepareScript
@@ -322,28 +447,56 @@ if (-not (Test-Path -LiteralPath $rayciExe)) {
 
 if ($CloseExisting) {
     Stop-ExistingRayCi
+    Stop-ExistingDahengHelpers
+    if (Test-Path -LiteralPath $seedRegistryScript) {
+        & $seedRegistryScript
+    }
 }
 
-$env:ULTRON_RAYCI_SIMULATE = '1'
-$env:ULTRON_RAYCI_AUTO_SIMULATE = '1'
-$env:ULTRON_RAYCI_SIM_PATTERN = $Pattern
-$env:ULTRON_RAYCI_SIM_CAPTURE_PIXEL_FORMAT = '2'
 $env:BEAMMIC_DAHENG_START_WIDTH = '1280'
 $env:BEAMMIC_DAHENG_START_HEIGHT = '1024'
-$env:ULTRON_RAYCI_IDENTITY_STYLE = $IdentityStyle
-$env:ULTRON_RAYCI_LIST_SERIAL_STYLE = $ListSerialStyle
-if ($AllowDuplicateCameraRows) {
-    $env:ULTRON_RAYCI_ALLOW_DUPLICATE_CAMERA_ROWS = '1'
-} else {
-    Remove-Item Env:ULTRON_RAYCI_ALLOW_DUPLICATE_CAMERA_ROWS -ErrorAction SilentlyContinue
+$realCameraEnvironmentNames = @(
+    'ULTRON_RAYCI_SIMULATE',
+    'ULTRON_RAYCI_AUTO_SIMULATE',
+    'ULTRON_RAYCI_SIM_PATTERN',
+    'ULTRON_RAYCI_SIM_CAPTURE_PIXEL_FORMAT',
+    'ULTRON_RAYCI_IDENTITY_STYLE',
+    'ULTRON_RAYCI_LIST_SERIAL_STYLE',
+    'ULTRON_RAYCI_ALLOW_DUPLICATE_CAMERA_ROWS',
+    'ULTRON_RAYCI_EXPOSE_CAPTURED_ALIASES',
+    'ULTRON_RAYCI_EXPOSE_REVERSE_ALIASES',
+    'ULTRON_RAYCI_EXPOSE_EXTENDED_CAMERA_KEYS',
+    'ULTRON_RAYCI_EXPOSE_MODEL_ALIASES',
+    'ULTRON_RAYCI_EXPOSE_VERBOSE_CAMERA_METADATA',
+    'BEAMMIC_DAHENG_SIMULATE',
+    'BEAMMIC_DAHENG_AUTO_SIMULATE',
+    'BEAMMIC_DAHENG_SIM_PATTERN',
+    'BEAMMIC_DAHENG_SN',
+    'VIRTUAL_UEYE_DAHENG_SN',
+    'VIRTUAL_UEYE_DAHENG_PIXEL_FORMAT',
+    'VIRTUAL_UEYE_DAHENG_FPS',
+    'BEAMMIC_DAHENG_FPS'
+)
+
+foreach ($name in $realCameraEnvironmentNames) {
+    Remove-Item ("Env:{0}" -f $name) -ErrorAction SilentlyContinue
 }
 
+$env:BEAMMIC_DAHENG_PIXEL_FORMAT = 'Mono10'
+$env:BEAMMIC_DAHENG_REVERSE_X = '0'
+$env:BEAMMIC_DAHENG_REVERSE_Y = '0'
+$env:BEAMMIC_DAHENG_GAIN_DB = '8'
+$env:ULTRON_RAYCI_IDENTIFICATION_EXTEND = '1'
+$portableHelperExe = Join-Path $portableRoot 'DahengBridgeHelper\DahengFrameServer.exe'
+$env:ULTRON_RAYCI_BRIDGE_HELPER = $portableHelperExe
+Stop-ExistingDahengHelpers -AllowedExecutablePath $portableHelperExe
+
 Write-Host "Launching RayCi bridge from: $rayciExe"
-Write-Host "Simulation pattern: $Pattern"
-Write-Host "Simulation capture format: Mono10 in Y16 container"
-Write-Host "Simulation size: 1280x1024"
-Write-Host "Identity style: $IdentityStyle"
-Write-Host "List serial style: $ListSerialStyle"
+Write-Host "Camera mode: single Daheng MER-130-30UM* bridge"
+Write-Host "Camera model prefix: MER-130-30UM"
+Write-Host "Pixel format: Mono10"
+Write-Host "Frame size: 1280x1024"
+Write-Host "Helper path: $portableHelperExe"
 $null = Start-Process -FilePath $rayciExe -WorkingDirectory $portableRoot -PassThru
 $title = Wait-ForRayCiWindow -TimeoutSec $StartupTimeoutSec
 Write-Host "RayCi main window: $title"
@@ -357,8 +510,18 @@ if ($FinalizeOpenLiveMode) {
     if ($null -ne $selectionReady) {
         Write-Host 'Selection rows are ready.'
 
-        $openLiveModeButton = $selectionReady.OpenLiveModeButton
-        $openButton = $selectionReady.OpenButton
+        Select-RayCiItem -Element $selectionReady.CameraRow -Label 'CinCam CMOS 1201 EL'
+        Select-RayCiItem -Element $selectionReady.AccessoryRow -Label 'plain'
+        Start-Sleep -Milliseconds 500
+
+        $openLiveModeButton = Find-RayCiElement `
+            -Windows @(Get-RayCiWindows) `
+            -Name 'Open LiveMode' `
+            -ControlTypeProgrammaticName ([System.Windows.Automation.ControlType]::Button.ProgrammaticName)
+        $openButton = Find-RayCiElement `
+            -Windows @(Get-RayCiWindows) `
+            -Name 'Open' `
+            -ControlTypeProgrammaticName ([System.Windows.Automation.ControlType]::Button.ProgrammaticName)
 
         if ($null -ne $openLiveModeButton -and (Get-SafeValue { $openLiveModeButton.Current.IsEnabled } $false)) {
             $invokePattern = Get-SafeValue {
@@ -393,15 +556,11 @@ if ($Verify) {
     $controlJsonPath = "$dumpPrefixResolved.control.json"
     $dumpScript = Join-Path $workspaceRoot 'dump-rayci-controls.ps1'
 
-    & $dumpScript `
-        -ProcessName 'RayCi' `
-        -View 'Control' `
-        -MaxDepth 6 `
-        -IncludePatterns `
-        -TreeOut $controlDumpPath `
-        -JsonOut $controlJsonPath | Out-Null
-
-    $summary = Get-VerificationSummary -ControlDumpPath $controlDumpPath
+    $summary = Wait-RayCiAcceptedStatus `
+        -DumpScript $dumpScript `
+        -ControlDumpPath $controlDumpPath `
+        -ControlJsonPath $controlJsonPath `
+        -TimeoutSec 30.0
 
     Write-Host ("Accepted: {0}" -f $summary.Accepted)
     if ($summary.LiveModeTitle) {
